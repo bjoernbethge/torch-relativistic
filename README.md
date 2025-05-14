@@ -1,5 +1,4 @@
-{
-  `text`: `# RelativisticTorch
+# torch-relativistic
 
 A PyTorch extension that implements neural network components inspired by relativistic physics, particularly the Terrell-Penrose effect.
 
