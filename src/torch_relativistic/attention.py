@@ -17,16 +17,15 @@ import math
 
 class RelativisticSelfAttention(nn.Module):
     """
-    Self-attention mechanism incorporating relativistic time dilation and distortion.
+    Optimized self-attention mechanism incorporating relativistic time dilation and distortion.
     
     This attention mechanism is inspired by the Terrell-Penrose effect, where
-    rapidly moving objects appear rotated rather than contracted. Similarly,
-    this module implements attention where each attention head operates in a 
-    different "reference frame" with its own relativistic velocity parameter.
+    rapidly moving objects appear rotated rather than contracted. This implementation
+    uses parameter sharing, vectorized operations, and rotary position embeddings
+    for better efficiency and performance.
     
-    This creates a multi-perspective attention mechanism where information
-    between tokens is processed as if affected by relativistic distortions
-    across different reference frames.
+    Each attention head operates in a different "reference frame" with its own
+    relativistic velocity parameter, but shares transformation parameters.
     
     Args:
         hidden_dim (int): Dimension of input features
@@ -34,85 +33,147 @@ class RelativisticSelfAttention(nn.Module):
         dropout (float, optional): Dropout probability. Defaults to 0.1.
         max_velocity (float, optional): Maximum velocity parameter (0-1). Defaults to 0.9.
         bias (bool, optional): Whether to include bias terms. Defaults to True.
+        pre_norm (bool, optional): Whether to use pre-normalization. Defaults to True.
     """
     
     def __init__(self, hidden_dim: int, num_heads: int = 8, dropout: float = 0.1,
-                 max_velocity: float = 0.9, bias: bool = True):
+                 max_velocity: float = 0.9, bias: bool = True, pre_norm: bool = True):
         super().__init__()
         
         self.hidden_dim = hidden_dim
         self.num_heads = num_heads
         self.head_dim = hidden_dim // num_heads
+        self.pre_norm = pre_norm
+        self.scale = self.head_dim ** -0.5
         
         assert self.head_dim * num_heads == hidden_dim, "hidden_dim must be divisible by num_heads"
         
-        # Standard attention components
-        self.q_proj = nn.Linear(hidden_dim, hidden_dim, bias=bias)
-        self.k_proj = nn.Linear(hidden_dim, hidden_dim, bias=bias)
-        self.v_proj = nn.Linear(hidden_dim, hidden_dim, bias=bias)
+        # Shared projection layers (parameter sharing)
+        self.qkv_proj = nn.Linear(hidden_dim, hidden_dim * 3, bias=bias)
         self.out_proj = nn.Linear(hidden_dim, hidden_dim, bias=bias)
         
-        # Dropout
+        # Pre-normalization layer for stability
+        if pre_norm:
+            self.norm = nn.LayerNorm(hidden_dim)
+        
+        # Dropout layers
         self.attn_dropout = nn.Dropout(dropout)
         self.output_dropout = nn.Dropout(dropout)
         
-        # Relativistic parameters - each head has its own "velocity"
-        # initialized to linearly increasing values
-        velocities = torch.linspace(0.1, max_velocity, num_heads)
-        self.velocity = nn.Parameter(velocities)
+        # Relativistic parameters with better initialization
+        # Now parameterized as a 2D tensor for more expressive velocity profiles
+        velocity_base = torch.linspace(0.1, max_velocity, num_heads)
+        self.velocity_scale = nn.Parameter(torch.ones(num_heads, 1))
+        self.velocity_bias = nn.Parameter(velocity_base.unsqueeze(1))
+        
+        # Rotary Position Embedding parameters for relativistic position modeling
+        self.rope_freqs = self._get_rope_frequencies(self.head_dim)
         
         # Initialize parameters
         self._reset_parameters()
     
-    def _reset_parameters(self):
-        """Initialize attention parameters."""
-        nn.init.xavier_uniform_(self.q_proj.weight, gain=1/math.sqrt(2))
-        nn.init.xavier_uniform_(self.k_proj.weight, gain=1/math.sqrt(2))
-        nn.init.xavier_uniform_(self.v_proj.weight, gain=1/math.sqrt(2))
-        nn.init.xavier_uniform_(self.out_proj.weight)
+    def _get_rope_frequencies(self, dim: int, base: int = 10000) -> torch.Tensor:
+        """Generate frequency bands for rotary embeddings."""
+        freqs = 1.0 / (base ** (torch.arange(0, dim, 2).float() / dim))
+        return freqs
+    
+    def _apply_rotary_pos_emb(self, q: torch.Tensor, k: torch.Tensor, positions: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Apply rotary position embeddings to queries and keys."""
+        device = q.device
+        t = positions.float().to(device)
         
-        if self.q_proj.bias is not None:
-            nn.init.zeros_(self.q_proj.bias)
-            nn.init.zeros_(self.k_proj.bias)
-            nn.init.zeros_(self.v_proj.bias)
+        # Get frequencies for each position
+        freqs = self.rope_freqs.to(device)
+        freqs = freqs.view(1, 1, -1)  # [1, 1, dim/2]
+        
+        # Create sinusoidal pattern
+        theta = torch.outer(t, freqs)  # [seq_len, dim/2]
+        sin = torch.sin(theta).unsqueeze(0).unsqueeze(0)  # [1, 1, seq_len, dim/2]
+        cos = torch.cos(theta).unsqueeze(0).unsqueeze(0)  # [1, 1, seq_len, dim/2]
+        
+        # Reshape for broadcasting
+        dim_half = self.head_dim // 2
+        reshape_dim = (q.shape[0], q.shape[1], q.shape[2], dim_half)
+        
+        # For complex number multiplication: (a+bi)(c+di) = (ac-bd) + (ad+bc)i
+        # Extract even and odd dimensions
+        q_even = q[:, :, :, 0::2].reshape(reshape_dim)
+        q_odd = q[:, :, :, 1::2].reshape(reshape_dim)
+        k_even = k[:, :, :, 0::2].reshape(reshape_dim)
+        k_odd = k[:, :, :, 1::2].reshape(reshape_dim)
+        
+        # Apply rotation using complex number multiplication
+        q_out_even = q_even * cos - q_odd * sin
+        q_out_odd = q_odd * cos + q_even * sin
+        k_out_even = k_even * cos - k_odd * sin
+        k_out_odd = k_odd * cos + k_even * sin
+        
+        # Interleave outputs
+        q_out = torch.zeros_like(q)
+        k_out = torch.zeros_like(k)
+        
+        q_out[:, :, :, 0::2] = q_out_even
+        q_out[:, :, :, 1::2] = q_out_odd
+        k_out[:, :, :, 0::2] = k_out_even
+        k_out[:, :, :, 1::2] = k_out_odd
+        
+        return q_out, k_out
+    
+    def _reset_parameters(self):
+        """Initialize attention parameters with optimal distributions."""
+        # Xavier initialization for QKV projection
+        nn.init.xavier_uniform_(self.qkv_proj.weight)
+        if self.qkv_proj.bias is not None:
+            nn.init.zeros_(self.qkv_proj.bias)
+        
+        # Output projection with slightly smaller weights
+        nn.init.xavier_uniform_(self.out_proj.weight, gain=0.9)
+        if self.out_proj.bias is not None:
             nn.init.zeros_(self.out_proj.bias)
     
     def forward(self, x: Tensor, attention_mask: Optional[Tensor] = None, 
                 positions: Optional[Tensor] = None) -> Tensor:
         """
-        Forward pass of relativistic self-attention.
+        Forward pass of optimized relativistic self-attention.
         
         Args:
             x (Tensor): Input tensor of shape [batch_size, seq_len, hidden_dim]
             attention_mask (Tensor, optional): Attention mask of shape [batch_size, seq_len].
                                               1 indicates value token, 0 indicates padding.
-                                              Defaults to None.
             positions (Tensor, optional): Position tensor for tokens [batch_size, seq_len, dim].
                                          Used to compute "spacetime" distances between tokens.
-                                         Defaults to None.
             
         Returns:
             Tensor: Output tensor of shape [batch_size, seq_len, hidden_dim]
         """
         batch_size, seq_len, _ = x.size()
         
-        # Compute query, key, value tensors
-        q = self.q_proj(x).view(batch_size, seq_len, self.num_heads, self.head_dim)
-        k = self.k_proj(x).view(batch_size, seq_len, self.num_heads, self.head_dim)
-        v = self.v_proj(x).view(batch_size, seq_len, self.num_heads, self.head_dim)
+        # Pre-normalization if enabled
+        if self.pre_norm:
+            x = self.norm(x)
         
-        # Transpose for matrix multiplication: [batch, heads, seq_len, head_dim]
-        q = q.transpose(1, 2)
-        k = k.transpose(1, 2)
-        v = v.transpose(1, 2)
+        # Generate position indices if not provided
+        if positions is None:
+            positions = torch.arange(seq_len, device=x.device).unsqueeze(0).expand(batch_size, -1)
         
-        # Compute attention scores
-        scale = self.head_dim ** -0.5
-        attn_weights = torch.matmul(q, k.transpose(-1, -2)) * scale  # [batch, heads, seq_len, seq_len]
+        # Project inputs to queries, keys, values in one go (efficient)
+        qkv = self.qkv_proj(x)
+        qkv = qkv.reshape(batch_size, seq_len, 3, self.num_heads, self.head_dim)
+        qkv = qkv.permute(2, 0, 3, 1, 4)  # [3, batch, heads, seq_len, head_dim]
+        q, k, v = qkv[0], qkv[1], qkv[2]
         
-        # Apply relativistic effects to attention weights for each head
+        # Apply rotary position embeddings
         if positions is not None:
-            attn_weights = self._apply_relativistic_effects(attn_weights, positions)
+            flat_positions = positions.reshape(batch_size * seq_len)
+            pos_indices = flat_positions.reshape(batch_size, seq_len)
+            q, k = self._apply_rotary_pos_emb(q, k, pos_indices)
+        
+        # Calculate attention scores with optimized scaling
+        attn_weights = torch.matmul(q, k.transpose(-1, -2)) * self.scale
+        
+        # Apply relativistic effects using vectorized operations
+        if positions is not None:
+            attn_weights = self._apply_relativistic_effects_vectorized(attn_weights, positions)
         
         # Apply attention mask if provided
         if attention_mask is not None:
@@ -122,28 +183,23 @@ class RelativisticSelfAttention(nn.Module):
             # Replace masked positions with large negative value
             attn_weights = attn_weights.masked_fill(~mask, float("-inf"))
         
-        # Normalized attention weights
+        # Normalized attention weights with stable softmax
         attn_weights = F.softmax(attn_weights, dim=-1)
         attn_weights = self.attn_dropout(attn_weights)
         
         # Apply attention to values
         attn_output = torch.matmul(attn_weights, v)  # [batch, heads, seq_len, head_dim]
         
-        # Transpose back: [batch, seq_len, heads, head_dim]
-        attn_output = attn_output.transpose(1, 2).contiguous()
-        
-        # Combine heads
-        attn_output = attn_output.view(batch_size, seq_len, self.hidden_dim)
-        
-        # Project to output
+        # Reshape and project to output dimension
+        attn_output = attn_output.transpose(1, 2).reshape(batch_size, seq_len, self.hidden_dim)
         output = self.out_proj(attn_output)
         output = self.output_dropout(output)
         
         return output
     
-    def _apply_relativistic_effects(self, attn_weights: Tensor, positions: Tensor) -> Tensor:
+    def _apply_relativistic_effects_vectorized(self, attn_weights: Tensor, positions: Tensor) -> Tensor:
         """
-        Apply relativistic effects to attention weights.
+        Apply relativistic effects to attention weights using vectorized operations.
         
         Args:
             attn_weights (Tensor): Raw attention weights [batch, heads, seq_len, seq_len]
@@ -154,43 +210,46 @@ class RelativisticSelfAttention(nn.Module):
         """
         batch_size, num_heads, seq_len, _ = attn_weights.size()
         
-        # Compute "spacetime distances" between token positions
-        # In a simplified relativistic model, the distance affects information propagation
-        if positions.size(-1) >= 2:
-            # Use at least 2D positions to calculate distances
-            pos_diffs = positions.unsqueeze(2) - positions.unsqueeze(1)  # [batch, seq, seq, dim]
-            distances = torch.norm(pos_diffs, dim=-1)  # [batch, seq, seq]
+        # Compute pairwise distances between all tokens more efficiently
+        if positions.dim() > 2:
+            # Use multi-dimensional positions if available
+            pos_extended = positions.unsqueeze(2)  # [batch, seq, 1, dim]
+            distances = torch.norm(
+                pos_extended - positions.unsqueeze(1),  # [batch, 1, seq, dim]
+                dim=-1, p=2
+            )  # [batch, seq, seq]
         else:
-            # If positions are 1D, use simple differences
-            pos_diffs = positions.unsqueeze(2) - positions.unsqueeze(1)  # [batch, seq, seq, 1]
-            distances = torch.abs(pos_diffs.squeeze(-1))  # [batch, seq, seq]
+            # Use 1D positions
+            pos_diff = positions.unsqueeze(2) - positions.unsqueeze(1)  # [batch, seq, seq]
+            distances = torch.abs(pos_diff)
         
-        # Normalize distances to [0, 1] range for stability
-        if distances.max() > 0:
-            distances = distances / (distances.max() + 1e-8)
+        # Normalize distances for numerical stability
+        if torch.max(distances) > 0:
+            distances = distances / (torch.max(distances) + 1e-8)
         
-        # For each head, apply its own relativistic transformation
-        for h in range(num_heads):
-            # Get head's velocity parameter (clamped for stability)
-            v_h = torch.clamp(torch.abs(self.velocity[h]), 0.0, 0.999)
-            
-            # Compute relativistic gamma factor
-            gamma = 1.0 / torch.sqrt(1.0 - v_h**2)
-            
-            # Apply Terrell-Penrose-inspired effect:
-            # Attention between distant tokens is transformed by relativistic factor
-            attn_modifier = torch.exp(-distances * gamma * v_h).unsqueeze(1)  # [batch, 1, seq, seq]
-            
-            # Apply the modifier to this head's attention weights
-            head_selector = torch.zeros_like(attn_weights)
-            head_selector[:, h:h+1, :, :] = 1.0
-            
-            # Blend the original weights with the transformed weights
-            # This creates a "relativistic aberration" effect on attention
-            attn_weights = attn_weights * (1.0 - head_selector) + \
-                           attn_weights * attn_modifier * head_selector
+        # Calculate velocity for each head using the parametric form
+        velocity = torch.clamp(self.velocity_scale * self.velocity_bias, 0.0, 0.999)  # [heads, 1]
         
-        return attn_weights
+        # Calculate gamma (Lorentz factor) for each head
+        gamma = 1.0 / torch.sqrt(1.0 - velocity**2 + 1e-8)  # [heads, 1]
+        
+        # Prepare distances for broadcasting
+        distances = distances.unsqueeze(1)  # [batch, 1, seq, seq]
+        
+        # Calculate relativistic modifiers for all heads simultaneously
+        # This creates a tensor of shape [batch, heads, seq, seq]
+        rel_modifiers = torch.exp(
+            -distances * gamma.view(1, num_heads, 1, 1) * velocity.view(1, num_heads, 1, 1)
+        )
+        
+        # Apply modifiers to attention weights
+        modified_attn = attn_weights * rel_modifiers
+        
+        # Rescale to ensure proper probability distribution
+        row_sums = modified_attn.sum(dim=-1, keepdim=True).clamp(min=1e-8)
+        modified_attn = modified_attn / row_sums
+        
+        return modified_attn
 
 
 class RelativisticPositionalEncoding(nn.Module):
