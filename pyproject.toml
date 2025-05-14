@@ -1,5 +1,5 @@
 [project]
-name = "python-template"
+name = "torch_relativistic"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"

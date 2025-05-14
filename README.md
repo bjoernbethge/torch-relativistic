@@ -1,98 +1,175 @@
-# torch-template
+{
+  `text`: `# RelativisticTorch
 
-A modern PyTorch project template using uv for dependency management.
+A PyTorch extension that implements neural network components inspired by relativistic physics, particularly the Terrell-Penrose effect.
 
-## Features
+## Overview
 
-- Fast dependency management with [uv](https://github.com/astral-sh/uv)
-- Clean project structure for PyTorch applications
-- Type annotations with proper tooling support
-- Optimized for performance and developer experience
+RelativisticTorch provides neural network modules that incorporate concepts from special relativity into machine learning. The key insight is that the Terrell-Penrose effect, where rapidly moving objects appear rotated rather than contracted, can inspire novel information processing paradigms in neural networks.
 
-## Getting Started
+This library includes:
+- Relativistic Graph Neural Networks (GNNs)
+- Relativistic Spiking Neural Networks (SNNs)
+- Relativistic attention mechanisms
+- Transformations inspired by special relativity
 
-### Prerequisites
-
-- Python 3.8+
-- [uv](https://github.com/astral-sh/uv) installed
-
-### Installation
-
-1. Clone the repository
-```bash
-git clone https://github.com/bjoernbethge/torch-template.git
-cd torch-template
-```
-
-2. Create and activate a virtual environment with uv
-```bash
-uv venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-```
-
-3. Install dependencies
-```bash
-uv pip install -e .
-```
-
-## Development
-
-### Adding Dependencies
-
-Add new dependencies to your project:
+## Installation
 
 ```bash
-# Add a runtime dependency
-uv pip install torch
-
-# Add a development dependency
-uv pip install --dev pytest
-
-# Update pyproject.toml after installing dependencies
-uv pip freeze > requirements.txt
+pip install -e .
 ```
 
-Then manually update your `pyproject.toml` with the new dependencies.
+## Components
 
-### Benefits of uv
+### Relativistic Graph Neural Networks
 
-- **Speed**: uv is significantly faster than pip for dependency resolution
-- **Reliability**: Consistent dependency resolution across environments
-- **Caching**: Efficient caching of downloaded packages
-- **Compatibility**: Works with existing Python projects and tools
+GNN modules that process information as if affected by relativistic phenomena:
 
-### Common uv Commands
+```python
+import torch
+from relativistic_torch.gnn import RelativisticGraphConv, MultiObserverGNN
 
-```bash
-# Install packages
-uv pip install <package>
+# Create a simple graph
+num_nodes = 10
+feature_dim = 16
+edge_index = torch.tensor([[0, 1, 1, 2, 2, 3, 3, 4, 4, 0],
+                           [1, 0, 2, 1, 3, 2, 4, 3, 0, 4]], dtype=torch.long)
+node_features = torch.randn(num_nodes, feature_dim)
 
-# Install from requirements file
-uv pip install -r requirements.txt
+# Create a relativistic GNN layer
+conv = RelativisticGraphConv(
+    in_channels=feature_dim,
+    out_channels=32,
+    max_relative_velocity=0.8
+)
 
-# Update packages
-uv pip install --upgrade <package>
+# Process the graph
+output_features = conv(node_features, edge_index)
+print(f\"Output shape: {output_features.shape}\")  # [10, 32]
 
-# List installed packages
-uv pip list
+# Multi-observer GNN processes the graph from multiple relativistic perspectives
+multi_observer_gnn = MultiObserverGNN(
+    feature_dim=feature_dim,
+    hidden_dim=32,
+    output_dim=8,
+    num_observers=4
+)
 
-# Show package info
-uv pip show <package>
+output = multi_observer_gnn(node_features, edge_index)
+print(f\"Multi-observer output shape: {output.shape}\")  # [10, 8]
 ```
 
-## Project Structure
+### Relativistic Spiking Neural Networks
 
+SNN components that incorporate relativistic time dilation:
+
+```python
+import torch
+from relativistic_torch.snn import RelativisticLIFNeuron, TerrellPenroseSNN
+
+# Create input spikes (batch_size=32, input_size=10)
+input_spikes = torch.bernoulli(torch.ones(32, 10) * 0.3)
+
+# Create a relativistic LIF neuron
+neuron = RelativisticLIFNeuron(
+    input_size=10,
+    threshold=1.0,
+    beta=0.9
+)
+
+# Initialize neuron state
+initial_state = neuron.init_state(batch_size=32)
+
+# Process input spikes
+output_spikes, new_state = neuron(input_spikes, initial_state)
+print(f\"Output spikes shape: {output_spikes.shape}\")  # [32]
+
+# Create a complete SNN
+snn = TerrellPenroseSNN(
+    input_size=10,
+    hidden_size=20,
+    output_size=5,
+    simulation_steps=100
+)
+
+# Process input
+output = snn(input_spikes)
+print(f\"SNN output shape: {output.shape}\")  # [32, 5]
+
+# Get spike history for visualization
+spike_history = snn.get_spike_history(input_spikes)
+print(f\"Hidden spike history shape: {spike_history['hidden_spikes'].shape}\")  # [32, 100, 20]
 ```
-torch-template/
-├── .python-version       # Python version specification
-├── pyproject.toml        # Project metadata and dependencies
-├── README.md             # This file
-└── src/                  # Source code
-    └── torch_template/   # Main package
-        ├── __init__.py   # Package initialization
-        └── py.typed      # Marker file for type checkers
+
+### Relativistic Attention Mechanism
+
+Attention where different heads operate in different reference frames:
+
+```python
+import torch
+from relativistic_torch.attention import RelativisticSelfAttention
+
+# Create input sequence (batch_size=16, seq_len=24, feature_dim=64)
+seq = torch.randn(16, 24, 64)
+
+# Create relativistic self-attention module
+attention = RelativisticSelfAttention(
+    hidden_dim=64,
+    num_heads=8,
+    dropout=0.1,
+    max_velocity=0.9
+)
+
+# Optional: Create positions for spacetime distances
+positions = torch.randn(16, 24, 3)  # 3D positions for each token
+
+# Process sequence
+output = attention(seq, positions=positions)
+print(f\"Output shape: {output.shape}\")  # [16, 24, 64]
 ```
 
-## License
+### Relativistic Transformations
 
-[MIT](LICENSE)
+Apply transformations inspired by special relativity to feature vectors:
+
+```python
+import torch
+from relativistic_torch.transforms import TerrellPenroseTransform, LorentzBoost
+
+# Create feature vectors (batch_size=8, feature_dim=64)
+features = torch.randn(8, 64)
+
+# Apply Terrell-Penrose inspired transformation
+transform = TerrellPenroseTransform(
+    feature_dim=64,
+    max_velocity=0.9,
+    mode=\"rotation\"
+)
+
+transformed = transform(features)
+print(f\"Transformed shape: {transformed.shape}\")  # [8, 64]
+
+# For spacetime features (batch_size=8, feature_dim=8 including 4D spacetime)
+spacetime_features = torch.randn(8, 8)
+
+# Apply Lorentz boost
+boost = LorentzBoost(
+    feature_dim=8,
+    time_dim=0,  # First dimension is time
+    max_velocity=0.8
+)
+
+boosted = boost(spacetime_features)
+print(f\"Boosted shape: {boosted.shape}\")  # [8, 8]
+```
+
+## Examples
+
+### Classification with Relativistic GNN
+
+```python
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from relativistic_torch.gnn import RelativisticGraphConv
+
