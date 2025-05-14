@@ -115,132 +115,200 @@ class RelativisticLIFNeuron(nn.Module):
 
 class TerrellPenroseSNN(nn.Module):
     """
-    Spiking Neural Network architecture inspired by the Terrell-Penrose effect.
+    Optimized Spiking Neural Network architecture inspired by the Terrell-Penrose effect.
     
-    This SNN architecture incorporates relativistic concepts from the Terrell-Penrose
-    effect, where information arrival times lead to perceptual transformations. In this
-    network, different neural pathways operate with different effective time dilations,
-    allowing the network to process temporal information across multiple effective
-    timescales simultaneously.
+    This SNN architecture integrates relativistic concepts through parameter sharing,
+    attention mechanisms and adaptive time-dependent weighting. The implementation
+    uses vectorized operations for efficient time step computation and surrogate
+    gradients for stable training.
     
     Args:
         input_size (int): Input dimension
-        hidden_size (int): Hidden layer size
-        output_size (int): Output dimension 
-        simulation_steps (int, optional): Number of time steps to simulate. Defaults to 100.
-        beta (float, optional): Membrane potential decay factor. Defaults to 0.9.
-        
-    Note:
-        The network integrates outputs over time with relativistically-inspired
-        weighting, giving different importance to spikes at different time points.
+        hidden_size (int): Size of hidden layers
+        output_size (int): Output dimension
+        simulation_steps (int, optional): Number of time steps to simulate. Default: 100.
+        beta (float, optional): Membrane decay factor. Default: 0.9.
+        dropout (float, optional): Dropout probability. Default: 0.1.
     """
     
     def __init__(self, input_size: int, hidden_size: int, output_size: int, 
-                 simulation_steps: int = 100, beta: float = 0.9):
+                 simulation_steps: int = 100, beta: float = 0.9, dropout: float = 0.1):
         super().__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.output_size = output_size
         self.simulation_steps = simulation_steps
         
-        # Input layer with relativistic information processing
-        self.input_layer = RelativisticLIFNeuron(
-            input_size, 
-            threshold=1.0,
-            beta=beta
-        )
+        # Gemeinsamer Basis-Neuron mit relativistischen Effekten
+        self.base_neuron = RelativisticLIFNeuron(max(input_size, hidden_size), beta=beta)
         
-        # Hidden layer with relativistic effects
-        self.hidden_layer = RelativisticLIFNeuron(
-            hidden_size, 
-            threshold=0.8,
-            beta=beta
-        )
+        # Adaptive neuronale Parameter
+        self.input_threshold = nn.Parameter(torch.ones(1) * 1.0)
+        self.hidden_threshold = nn.Parameter(torch.ones(1) * 0.8)
         
-        # Connections between layers
+        # Trainierbare Zeitkonstanten
+        self.input_beta = nn.Parameter(torch.ones(1) * beta)
+        self.hidden_beta = nn.Parameter(torch.ones(1) * beta)
+        
+        # Verbindungen zwischen Schichten
         self.fc1 = nn.Linear(input_size, hidden_size)
         self.fc2 = nn.Linear(hidden_size, output_size)
         
-        # Readout parameters
-        self.output_scale = nn.Parameter(torch.ones(output_size))
-        self.output_bias = nn.Parameter(torch.zeros(output_size))
+        # Batch-Normalisierung für stabileres Training
+        self.bn1 = nn.BatchNorm1d(hidden_size)
+        self.bn2 = nn.BatchNorm1d(output_size)
+        
+        # Dropout für Regularisierung
+        self.dropout = nn.Dropout(dropout)
+        
+        # Aufmerksamkeitsmechanismus für zeitliche Integration
+        self.time_attention = nn.Parameter(torch.ones(simulation_steps) / simulation_steps)
+        
+        # Relativistische Gewichtungsfaktoren
+        self.lorentz_factor = nn.Parameter(torch.tensor([0.5]))
+        
+        # Surrogate Gradient Funktionsparameter
+        self.surrogate_scale = nn.Parameter(torch.tensor([10.0]))
+    
+    def surrogate_spike_function(self, x: Tensor, threshold: Tensor) -> Tensor:
+        """
+        Differentiable approximation of the spike function (FastSigmoid).
+        
+        Args:
+            x (Tensor): Membrane potentials
+            threshold (Tensor): Threshold for spikes
+            
+        Returns:
+            Tensor: Spike output with surrogate gradients
+        """
+        # Im Forward-Pass: Binäre Spikes
+        spikes = (x > threshold).float()
+        
+        # Im Backward-Pass: FastSigmoid als Surrogate-Gradient
+        if self.training:
+            scale = self.surrogate_scale
+            x_normalized = (x - threshold) * scale
+            grad_scale = torch.sigmoid(x_normalized) * (1 - torch.sigmoid(x_normalized)) * scale
+            
+            # Gradient-Ersetzung durch benutzerdefinierte Autograd-Funktion
+            class SurrogateSpike(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, input, grad_scale):
+                    ctx.save_for_backward(grad_scale)
+                    return (input > 0).float()
+                
+                @staticmethod
+                def backward(ctx, grad_output):
+                    grad_scale, = ctx.saved_tensors
+                    return grad_output * grad_scale, None
+            
+            spikes = SurrogateSpike.apply(x - threshold, grad_scale)
+            
+        return spikes
     
     def forward(self, x: Tensor, initial_state: Optional[Dict[str, Tuple[Tensor, Tensor]]] = None) -> Tensor:
         """
-        Forward pass of the SNN.
+        Forward pass of the SNN with vectorized time step computation and attention.
         
         Args:
             x (Tensor): Input tensor [batch_size, input_size] or [batch_size, time_steps, input_size]
-            initial_state (Dict, optional): Initial states for neurons. Defaults to None.
+            initial_state (Dict, optional): Initial states for neurons. Default: None.
             
         Returns:
             Tensor: Network output [batch_size, output_size]
         """
         # Handle both static and temporal inputs
         if x.dim() == 2:
-            # Static input - repeat for all simulation steps
             batch_size, _ = x.size()
             x = x.unsqueeze(1).expand(-1, self.simulation_steps, -1)
         elif x.dim() == 3:
             batch_size, time_steps, _ = x.size()
             if time_steps < self.simulation_steps:
-                # Pad with zeros if input has fewer time steps
                 padding = torch.zeros(batch_size, self.simulation_steps - time_steps, 
-                                      self.input_size, device=x.device)
+                                     self.input_size, device=x.device)
                 x = torch.cat([x, padding], dim=1)
             elif time_steps > self.simulation_steps:
-                # Truncate if input has more time steps
                 x = x[:, :self.simulation_steps, :]
         else:
-            raise ValueError(f"Expected input dims 2 or 3, got {x.dim()}")
+            raise ValueError(f"Expected input dimensions 2 or 3, got {x.dim()}")
         
         batch_size = x.size(0)
         device = x.device
         
-        # Initialize neuron states if not provided
+        # initialize neuron states
         if initial_state is None:
-            h1_state = self.input_layer.init_state(batch_size, device)
-            h2_state = self.hidden_layer.init_state(batch_size, device)
+            input_membrane = torch.zeros(batch_size, device=device)
+            input_spikes = torch.zeros(batch_size, device=device)
+            hidden_membrane = torch.zeros(batch_size, device=device)
+            hidden_spikes = torch.zeros(batch_size, device=device)
         else:
-            h1_state = initial_state.get('input_layer', self.input_layer.init_state(batch_size, device))
-            h2_state = initial_state.get('hidden_layer', self.hidden_layer.init_state(batch_size, device))
+            (input_membrane, input_spikes) = initial_state.get('input_layer', 
+                                                             (torch.zeros(batch_size, device=device), 
+                                                              torch.zeros(batch_size, device=device)))
+            (hidden_membrane, hidden_spikes) = initial_state.get('hidden_layer', 
+                                                               (torch.zeros(batch_size, device=device), 
+                                                                torch.zeros(batch_size, device=device)))
         
-        # Output storage
-        outputs = []
-        spikes_hidden = []
+        # output storage for all time steps
+        all_outputs = []
+        all_hidden_spikes = []
         
-        # Simulate SNN for multiple time steps
-        for t in range(self.simulation_steps):
-            # Input layer
-            out_1, h1_state = self.input_layer(x[:, t], h1_state)
-            
-            # Hidden layer
-            hidden_inputs = self.fc1(out_1)
-            out_2, h2_state = self.hidden_layer(hidden_inputs, h2_state)
-            spikes_hidden.append(out_2)
-            
-            # Output layer
-            current_output = self.fc2(out_2)
-            outputs.append(current_output)
-        
-        # Stack outputs over time dimension
-        outputs = torch.stack(outputs, dim=1)  # [batch_size, time_steps, output_size]
-        
-        # Apply relativistic time weighting
-        # (later time steps receive different weights based on "relativistic velocity")
-        v = torch.clamp(self.input_layer.velocity, 0.0, 0.999)
+        # calculate relativistic Lorentz factor
+        v = torch.clamp(self.lorentz_factor, 0.0, 0.999)  # limit to < c
         gamma = 1.0 / torch.sqrt(1.0 - v**2)
         
-        # Create time-step-dependent weights with relativistic inspiration
+        # calculate relativistic arrival times with vectorization
+        delays = gamma * torch.abs(self.base_neuron.causal_distances[:self.input_size]) * v
+        input_delay_factors = torch.exp(-delays).unsqueeze(0)  # [1, input_size]
+        
+        hidden_delays = gamma * torch.abs(self.base_neuron.causal_distances[:self.hidden_size]) * v
+        hidden_delay_factors = torch.exp(-hidden_delays).unsqueeze(0)  # [1, hidden_size]
+        
+        # simulate SNN for multiple time steps
+        for t in range(self.simulation_steps):
+            # input layer with relativistic processing
+            effective_inputs = x[:, t] * input_delay_factors
+            input_membrane = input_membrane * self.input_beta + torch.sum(effective_inputs, dim=1)
+            input_spikes = self.surrogate_spike_function(input_membrane, self.input_threshold)
+            input_membrane = input_membrane * (1.0 - input_spikes)
+            
+            # hidden layer
+            hidden_inputs = self.fc1(input_spikes)
+            # BatchNorm only during training
+            if self.training and batch_size > 1:  # BatchNorm requires more than one sample
+                hidden_inputs = self.bn1(hidden_inputs)
+            
+            effective_hidden = hidden_inputs * hidden_delay_factors[:, :self.hidden_size]
+            hidden_membrane = hidden_membrane * self.hidden_beta + torch.sum(effective_hidden, dim=1)
+            hidden_spikes = self.surrogate_spike_function(hidden_membrane, self.hidden_threshold)
+            hidden_membrane = hidden_membrane * (1.0 - hidden_spikes)
+            
+            # collect hidden spikes for analysis
+            all_hidden_spikes.append(hidden_spikes)
+            
+            # output layer with dropout
+            output = self.fc2(self.dropout(hidden_spikes) if self.training else hidden_spikes)
+            if self.training and batch_size > 1:
+                output = self.bn2(output)
+            
+            all_outputs.append(output)
+        
+        # stack output over time dimension
+        all_outputs = torch.stack(all_outputs, dim=1)  # [batch_size, time_steps, output_size]
+        
+        # apply attention weighting over time
+        attention_weights = F.softmax(self.time_attention, dim=0)
+        
+        # time-dependent relativistic weighting
         time_steps = torch.arange(self.simulation_steps, device=device).float()
-        time_weights = torch.exp(-(gamma - 1.0) * time_steps)
-        time_weights = time_weights / time_weights.sum()  # Normalize weights
+        relativistic_weights = torch.exp(-(gamma - 1.0) * time_steps)
+        combined_weights = attention_weights * relativistic_weights
+        combined_weights = combined_weights / combined_weights.sum()  # normalize weights
         
-        # Apply weighted summation over time
-        weighted_output = torch.sum(outputs * time_weights.view(1, -1, 1), dim=1)
+        # apply weighted summation over time
+        weighted_output = torch.sum(all_outputs * combined_weights.view(1, -1, 1), dim=1)
         
-        # Apply output scaling and bias
-        return weighted_output * self.output_scale + self.output_bias
+        return weighted_output
     
     def get_spike_history(self, x: Tensor) -> Dict[str, torch.Tensor]:
         """
@@ -252,39 +320,70 @@ class TerrellPenroseSNN(nn.Module):
         Returns:
             Dict[str, torch.Tensor]: Dictionary containing spike histories
         """
+        # This function implements its own simulation
+        # to capture the complete spike history
+        
         batch_size = x.size(0)
         device = x.device
         
-        # Initialize states
-        h1_state = self.input_layer.init_state(batch_size, device)
-        h2_state = self.hidden_layer.init_state(batch_size, device)
-        
-        # Make sure input has time dimension
+        # ensure input has time dimension
         if x.dim() == 2:
             x = x.unsqueeze(1).expand(-1, self.simulation_steps, -1)
+        elif x.dim() == 3:
+            time_steps = x.size(1)
+            if time_steps < self.simulation_steps:
+                padding = torch.zeros(batch_size, self.simulation_steps - time_steps, 
+                                     self.input_size, device=device)
+                x = torch.cat([x, padding], dim=1)
+            elif time_steps > self.simulation_steps:
+                x = x[:, :self.simulation_steps, :]
         
-        # Record spike history
-        input_spikes = []
-        hidden_spikes = []
+        # initialize neuron states
+        input_membrane = torch.zeros(batch_size, device=device)
+        input_spikes = torch.zeros(batch_size, device=device)
+        hidden_membrane = torch.zeros(batch_size, device=device)
+        hidden_spikes = torch.zeros(batch_size, device=device)
         
-        # Run simulation
+        # calculate relativistic factors
+        v = torch.clamp(self.lorentz_factor, 0.0, 0.999)
+        gamma = 1.0 / torch.sqrt(1.0 - v**2)
+        
+        delays = gamma * torch.abs(self.base_neuron.causal_distances[:self.input_size]) * v
+        input_delay_factors = torch.exp(-delays).unsqueeze(0)
+        
+        hidden_delays = gamma * torch.abs(self.base_neuron.causal_distances[:self.hidden_size]) * v
+        hidden_delay_factors = torch.exp(-hidden_delays).unsqueeze(0)
+        
+        # capture spike history
+        input_spikes_history = []
+        hidden_spikes_history = []
+        
+        # perform simulation
         for t in range(self.simulation_steps):
-            # Input layer
-            out_1, h1_state = self.input_layer(x[:, t], h1_state)
-            input_spikes.append(out_1)
+            # input layer
+            effective_inputs = x[:, t] * input_delay_factors
+            input_membrane = input_membrane * self.input_beta + torch.sum(effective_inputs, dim=1)
+            input_spikes = (input_membrane > self.input_threshold).float()  # use hard threshold for visualization
+            input_membrane = input_membrane * (1.0 - input_spikes)
+            input_spikes_history.append(input_spikes)
             
-            # Hidden layer
-            hidden_inputs = self.fc1(out_1)
-            out_2, h2_state = self.hidden_layer(hidden_inputs, h2_state)
-            hidden_spikes.append(out_2)
+            # hidden layer
+            hidden_inputs = self.fc1(input_spikes)
+            effective_hidden = hidden_inputs * hidden_delay_factors[:, :self.hidden_size]
+            hidden_membrane = hidden_membrane * self.hidden_beta + torch.sum(effective_hidden, dim=1)
+            hidden_spikes = (hidden_membrane > self.hidden_threshold).float()  # Verwende harte Schwelle für Visualisierung
+            hidden_membrane = hidden_membrane * (1.0 - hidden_spikes)
+            hidden_spikes_history.append(hidden_spikes)
         
-        # Stack over time dimension
-        input_spikes = torch.stack(input_spikes, dim=1)  # [batch_size, time_steps, input_size]
-        hidden_spikes = torch.stack(hidden_spikes, dim=1)  # [batch_size, time_steps, hidden_size]
+        # stack over time dimension
+        input_spikes_history = torch.stack(input_spikes_history, dim=1)   # [batch_size, time_steps, input_size]
+        hidden_spikes_history = torch.stack(hidden_spikes_history, dim=1) # [batch_size, time_steps, hidden_size]
         
         return {
-            'input_spikes': input_spikes,
-            'hidden_spikes': hidden_spikes
+            'input_spikes': input_spikes_history,
+            'hidden_spikes': hidden_spikes_history,
+            'lorentz_factor': gamma.item(),
+            'attention_weights': F.softmax(self.time_attention, dim=0).detach().cpu().numpy()
         }
 
 

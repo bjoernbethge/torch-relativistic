@@ -216,11 +216,10 @@ class MultiObserverGNN(nn.Module):
     
     Inspired by the way the Terrell-Penrose effect shows how appearance changes based on
     different reference frames, this module processes a graph through multiple different
-    relativistic GNN layers, each with different velocity parameters. This simulates
-    multiple "observers" viewing the graph information from different reference frames.
+    relativistic reference frames using parameter sharing and learnable velocity configurations.
     
-    The resulting multi-view graph representations are then integrated to form a more
-    robust final representation that incorporates information from different "perspectives".
+    The multi-view representations are integrated using attention mechanisms to form a
+    more robust final representation that incorporates information from different "perspectives".
     
     Args:
         feature_dim (int): Dimension of input node features
@@ -242,21 +241,25 @@ class MultiObserverGNN(nn.Module):
         self.feature_dim = feature_dim
         self.hidden_dim = hidden_dim
         self.output_dim = output_dim
+        self.velocity_max = velocity_max
         
         # Feature preprocessing (shared)
         self.feature_transform = nn.Linear(feature_dim, hidden_dim)
         
-        # Different "observers" with varying relativistic parameters
-        self.observer_layers = nn.ModuleList([
-            RelativisticGraphConv(
-                hidden_dim, 
-                hidden_dim,
-                max_relative_velocity=velocity_max * (i+1) / num_observers
-            ) 
-            for i in range(num_observers)
-        ])
+        # Gemeinsame Basisschicht für alle Beobachter (Parameter-Sharing)
+        self.base_layer = RelativisticGraphConv(hidden_dim, hidden_dim)
         
-        # Integration of different perspectives
+        # Parameter für die relativistischen Geschwindigkeiten (lernbar)
+        velocities = torch.linspace(velocity_max/num_observers, velocity_max, num_observers)
+        self.velocity_params = nn.Parameter(velocities)
+        
+        # Batch-Normalisierung für jede Beobachterperspektive
+        self.batch_norms = nn.ModuleList([nn.BatchNorm1d(hidden_dim) for _ in range(num_observers)])
+        
+        # Attention-Mechanismus für Perspektiven-Gewichtung
+        self.attention = nn.Parameter(torch.ones(num_observers, hidden_dim) / num_observers)
+        
+        # Integration der verschiedenen Perspektiven
         self.integration = nn.Sequential(
             nn.Linear(num_observers * hidden_dim, hidden_dim * 2),
             nn.LayerNorm(hidden_dim * 2),
@@ -285,8 +288,26 @@ class MultiObserverGNN(nn.Module):
         # Collect observations from different relativistic reference frames
         multi_view_features = []
         
-        for observer in self.observer_layers:
-            view = observer(h, edge_index, edge_attr, position)
+        for i in range(self.num_observers):
+            # Temporär die Geschwindigkeitsparameter anpassen
+            with torch.no_grad():
+                original_velocity = self.base_layer.max_relative_velocity
+                self.base_layer.max_relative_velocity = self.velocity_params[i].item()
+            
+            # Beobachtung sammeln
+            view = self.base_layer(h, edge_index, edge_attr, position)
+            
+            # Auf Original zurücksetzen
+            with torch.no_grad():
+                self.base_layer.max_relative_velocity = original_velocity
+            
+            # Anwendung von Batch-Normalisierung und Aktivierung
+            view = self.batch_norms[i](view)
+            view = F.relu(view)
+            
+            # Gewichtung mit Attention
+            view = view * F.softmax(self.attention[i], dim=0).unsqueeze(0)
+            
             multi_view_features.append(view)
         
         # Concatenate all views
