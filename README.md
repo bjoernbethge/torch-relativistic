@@ -172,3 +172,39 @@ import torch.nn as nn
 import torch.nn.functional as F
 from relativistic_torch.gnn import RelativisticGraphConv
 
+
+```
+
+# PyPI Veröffentlichung mit GitHub Actions
+
+## Setup
+
+1. Erstelle ein PyPI API-Token auf [pypi.org](https://pypi.org/manage/account/token/)
+2. Füge das Token als GitHub Secret hinzu:
+   - Gehe zu deinem Repository auf GitHub
+   - Navigiere zu "Settings" > "Secrets and variables" > "Actions"
+   - Klicke auf "New repository secret"
+   - Name: `PYPI_API_TOKEN`
+   - Value: Dein PyPI API-Token
+
+## Veröffentlichungsprozess
+
+Das Paket wird automatisch veröffentlicht, wenn:
+
+1. Ein neuer Release auf GitHub erstellt wird
+2. Der Workflow manuell über die GitHub Actions-Oberfläche ausgelöst wird
+
+## Lokales Testen
+
+```bash
+# Paket bauen
+uv build
+
+# Paket auf TestPyPI veröffentlichen (optional)
+uv pip install twine
+twine upload --repository-url https://test.pypi.org/legacy/ dist/* --username __token__ --password "DEIN_TEST_PYPI_TOKEN"
+```
+
+## Konfiguration
+
+Die GitHub Action verwendet UV statt pip für alle Vorgänge und veröffentlicht das Paket auf PyPI mit dem konfigurierten API-Token.
