@@ -1,7 +1,7 @@
 [project]
 name = "torch_relativistic"
-version = "0.1.0"
-description = "Add your description here"
+version = "0.1.1"
+description = "A PyTorch extension that implements neural network components inspired by relativistic physics, particularly the Terrell-Penrose effect."
 readme = "README.md"
 authors = [
     { name = "Björn Bethge", email = "" }
