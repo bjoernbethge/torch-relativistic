@@ -162,15 +162,3 @@ boosted = boost(spacetime_features)
 print(f\"Boosted shape: {boosted.shape}\")  # [8, 8]
 ```
 
-## Examples
-
-### Classification with Relativistic GNN
-
-```python
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from relativistic_torch.gnn import RelativisticGraphConv
-
-
-```
