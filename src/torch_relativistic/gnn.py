@@ -7,26 +7,29 @@ The key insight is modeling node-to-node communication as if affected by relativ
 effects like time dilation and apparent rotation seen in the Terrell-Penrose effect.
 """
 
+from typing import Optional
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
-from typing import Optional, Tuple, List, Union, Dict, Any
 
 # For PyTorch Geometric compatibility - gracefully handle if not available
 try:
-    from torch_geometric.nn import MessagePassing
-    from torch_scatter import scatter_add
+    from torch_geometric.nn import MessagePassing  # type: ignore[import-untyped]
+
     HAS_PYGEOMETRIC = True
 except ImportError:
-    # Create stub class to allow the module to load without PyTorch Geometric
-    class MessagePassing:
-        def __init__(self, aggr="add"):
-            self.aggr = aggr
     HAS_PYGEOMETRIC = False
 
 
-class RelativisticGraphConv(MessagePassing if HAS_PYGEOMETRIC else nn.Module):
+class MessagePassingFallback(nn.Module):
+    def __init__(self, aggr="add"):
+        super().__init__()
+        self.aggr = aggr
+
+
+class RelativisticGraphConv((MessagePassing if HAS_PYGEOMETRIC else MessagePassingFallback)):  # type: ignore[misc]
     """
     A graph convolutional layer that incorporates relativistic effects inspired by the Terrell-Penrose effect.
     
@@ -49,7 +52,7 @@ class RelativisticGraphConv(MessagePassing if HAS_PYGEOMETRIC else nn.Module):
         Requires PyTorch Geometric for full functionality. Falls back to a simplified version
         if PyTorch Geometric is not available.
     """
-    
+
     def __init__(self, in_channels: int, out_channels: int, max_relative_velocity: float = 0.9,
                  bias: bool = True, aggr: str = "add"):
         if HAS_PYGEOMETRIC:
@@ -57,18 +60,18 @@ class RelativisticGraphConv(MessagePassing if HAS_PYGEOMETRIC else nn.Module):
         else:
             super().__init__()
             print("Warning: PyTorch Geometric not available. RelativisticGraphConv will use simplified implementation.")
-        
+
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.max_relative_velocity = max_relative_velocity
-        
+
         # Learnable parameters
         self.linear = nn.Linear(in_channels, out_channels, bias=bias)
         self.velocity_factor = nn.Parameter(torch.Tensor([0.5]))  # Initialize at 0.5c
-        
+
         # Reset parameters
         self.reset_parameters()
-    
+
     def reset_parameters(self):
         """Reset learnable parameters to initial values."""
         nn.init.xavier_uniform_(self.linear.weight)
@@ -76,8 +79,8 @@ class RelativisticGraphConv(MessagePassing if HAS_PYGEOMETRIC else nn.Module):
             nn.init.zeros_(self.linear.bias)
         with torch.no_grad():
             self.velocity_factor.data.fill_(0.5)
-    
-    def forward(self, x: Tensor, edge_index: Tensor, edge_attr: Optional[Tensor] = None, 
+
+    def forward(self, x: Tensor, edge_index: Tensor, edge_attr: Optional[Tensor] = None,
                 position: Optional[Tensor] = None) -> Tensor:
         """
         Forward pass of relativistic graph convolution.
@@ -94,14 +97,14 @@ class RelativisticGraphConv(MessagePassing if HAS_PYGEOMETRIC else nn.Module):
         # If positions not provided, use first dimensions of features as abstract positions
         if position is None:
             position = x[:, :min(3, x.size(1))]
-        
+
         if HAS_PYGEOMETRIC:
             # Use PyTorch Geometric's MessagePassing machinery
             return self.propagate(edge_index, x=x, position=position, edge_attr=edge_attr)
         else:
             # Simplified implementation without PyTorch Geometric
             return self._simplified_forward(x, edge_index, position, edge_attr)
-    
+
     def message(self, x_j: Tensor, position_i: Tensor, position_j: Tensor,
                 edge_attr: Optional[Tensor] = None) -> Tensor:
         """
@@ -119,24 +122,24 @@ class RelativisticGraphConv(MessagePassing if HAS_PYGEOMETRIC else nn.Module):
         # Calculate "relative velocity" between connected nodes
         delta_position = position_j - position_i
         distance = torch.norm(delta_position, dim=1, keepdim=True)
-        
+
         # Scale velocity by distance and learnable factor, clamped to max relative velocity
         v_rel = self.velocity_factor * torch.clamp(distance / distance.max(), 0, self.max_relative_velocity)
-        gamma = 1.0 / torch.sqrt(1.0 - v_rel**2 + 1e-8)  # Add epsilon for numerical stability
-        
+        gamma = 1.0 / torch.sqrt(1.0 - v_rel ** 2 + 1e-8)  # Add epsilon for numerical stability
+
         # Transform features using node linear transformation
         transformed_features = self.linear(x_j)
-        
+
         # Apply relativistic transformation factor
         messages = transformed_features * self._terrell_penrose_factor(delta_position, v_rel, gamma)
-        
+
         # Incorporate edge features if provided
         if edge_attr is not None:
             # Simple multiplication as one way to include edge information
             messages = messages * edge_attr.unsqueeze(-1) if edge_attr.dim() == 1 else messages * edge_attr
-            
+
         return messages
-    
+
     def _terrell_penrose_factor(self, delta_pos: Tensor, velocity: Tensor, gamma: Tensor) -> Tensor:
         """
         Calculate a factor inspired by the Terrell-Penrose effect to modify message passing.
@@ -151,16 +154,16 @@ class RelativisticGraphConv(MessagePassing if HAS_PYGEOMETRIC else nn.Module):
         """
         # Normalize direction vector
         direction = delta_pos / (torch.norm(delta_pos, dim=1, keepdim=True) + 1e-8)
-        
+
         # Factor inspired by relativistic aberration and apparent rotation
         # This simulates how information from different nodes appears "rotated" due to
         # relative motion, similar to the Terrell-Penrose effect
         aberration_factor = 1.0 / (gamma * (1.0 + velocity * torch.sum(direction, dim=1, keepdim=True)))
-        
+
         return aberration_factor
-    
+
     def _simplified_forward(self, x: Tensor, edge_index: Tensor, position: Tensor,
-                           edge_attr: Optional[Tensor] = None) -> Tensor:
+                            edge_attr: Optional[Tensor] = None) -> Tensor:
         """
         Simplified implementation when PyTorch Geometric is not available.
         
@@ -175,38 +178,38 @@ class RelativisticGraphConv(MessagePassing if HAS_PYGEOMETRIC else nn.Module):
         """
         num_nodes = x.size(0)
         src, dst = edge_index[0], edge_index[1]
-        
+
         # Create messages
         x_j = x[src]
         position_i = position[dst]
         position_j = position[src]
-        
+
         # Calculate relativistic message
         delta_position = position_j - position_i
         distance = torch.norm(delta_position, dim=1, keepdim=True)
-        
+
         v_rel = self.velocity_factor * torch.clamp(distance / distance.max(), 0, self.max_relative_velocity)
-        gamma = 1.0 / torch.sqrt(1.0 - v_rel**2 + 1e-8)
-        
+        gamma = 1.0 / torch.sqrt(1.0 - v_rel ** 2 + 1e-8)
+
         transformed_features = self.linear(x_j)
         direction = delta_position / (torch.norm(delta_position, dim=1, keepdim=True) + 1e-8)
         aberration_factor = 1.0 / (gamma * (1.0 + v_rel * torch.sum(direction, dim=1, keepdim=True)))
-        
+
         messages = transformed_features * aberration_factor
-        
+
         if edge_attr is not None:
             if edge_attr.dim() == 1:
                 messages = messages * edge_attr.unsqueeze(-1)
             else:
                 messages = messages * edge_attr
-        
+
         # Manual aggregation (simplified version of scatter_add)
         output = torch.zeros(num_nodes, self.out_channels, device=x.device)
-        
+
         # For each target node, sum the incoming messages
         for i in range(len(dst)):
             output[dst[i]] += messages[i]
-            
+
         return output
 
 
@@ -233,7 +236,7 @@ class MultiObserverGNN(nn.Module):
         This model can work even without PyTorch Geometric, but full functionality
         requires PyTorch Geometric to be installed.
     """
-    
+
     def __init__(self, feature_dim: int, hidden_dim: int, output_dim: int,
                  num_observers: int = 4, velocity_max: float = 0.9, dropout: float = 0.1):
         super().__init__()
@@ -242,24 +245,24 @@ class MultiObserverGNN(nn.Module):
         self.hidden_dim = hidden_dim
         self.output_dim = output_dim
         self.velocity_max = velocity_max
-        
+
         # Feature preprocessing (shared)
         self.feature_transform = nn.Linear(feature_dim, hidden_dim)
-        
-        # Gemeinsame Basisschicht für alle Beobachter (Parameter-Sharing)
+
+        # shared base layer for all observers (parameter sharing)
         self.base_layer = RelativisticGraphConv(hidden_dim, hidden_dim)
-        
-        # Parameter für die relativistischen Geschwindigkeiten (lernbar)
-        velocities = torch.linspace(velocity_max/num_observers, velocity_max, num_observers)
+
+        # parameters for the relativistic velocities (learnable)
+        velocities = torch.linspace(velocity_max / num_observers, velocity_max, num_observers)
         self.velocity_params = nn.Parameter(velocities)
-        
-        # Batch-Normalisierung für jede Beobachterperspektive
+
+        # batch normalization for each observer perspective
         self.batch_norms = nn.ModuleList([nn.BatchNorm1d(hidden_dim) for _ in range(num_observers)])
-        
-        # Attention-Mechanismus für Perspektiven-Gewichtung
+
+        # attention mechanism for perspective weighting
         self.attention = nn.Parameter(torch.ones(num_observers, hidden_dim) / num_observers)
-        
-        # Integration der verschiedenen Perspektiven
+
+        # integration of different perspectives
         self.integration = nn.Sequential(
             nn.Linear(num_observers * hidden_dim, hidden_dim * 2),
             nn.LayerNorm(hidden_dim * 2),
@@ -267,8 +270,8 @@ class MultiObserverGNN(nn.Module):
             nn.Dropout(dropout),
             nn.Linear(hidden_dim * 2, output_dim)
         )
-    
-    def forward(self, x: Tensor, edge_index: Tensor, edge_attr: Optional[Tensor] = None, 
+
+    def forward(self, x: Tensor, edge_index: Tensor, edge_attr: Optional[Tensor] = None,
                 position: Optional[Tensor] = None) -> Tensor:
         """
         Forward pass of the multi-observer GNN.
@@ -284,36 +287,36 @@ class MultiObserverGNN(nn.Module):
         """
         # Transform input features
         h = F.relu(self.feature_transform(x))
-        
+
         # Collect observations from different relativistic reference frames
         multi_view_features = []
-        
+
         for i in range(self.num_observers):
-            # Temporär die Geschwindigkeitsparameter anpassen
+            # temporarily adjust the velocity parameters
             with torch.no_grad():
                 original_velocity = self.base_layer.max_relative_velocity
                 self.base_layer.max_relative_velocity = self.velocity_params[i].item()
-            
-            # Beobachtung sammeln
+
+            # collect observations
             view = self.base_layer(h, edge_index, edge_attr, position)
-            
-            # Auf Original zurücksetzen
+
+            # reset to original
             with torch.no_grad():
                 self.base_layer.max_relative_velocity = original_velocity
-            
-            # Anwendung von Batch-Normalisierung und Aktivierung
+
+            # apply batch normalization and activation
             view = self.batch_norms[i](view)
             view = F.relu(view)
-            
-            # Gewichtung mit Attention
+
+            # weighting with attention
             view = view * F.softmax(self.attention[i], dim=0).unsqueeze(0)
-            
+
             multi_view_features.append(view)
-        
+
         # Concatenate all views
         combined = torch.cat(multi_view_features, dim=1)
-        
+
         # Integrate the different perspectives
         output = self.integration(combined)
-        
+
         return output

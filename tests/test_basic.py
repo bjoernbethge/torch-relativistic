@@ -1,48 +1,63 @@
 """Basic tests for torch-relativistic"""
-
 import torch
 import pytest
+import importlib.util
 
 
-def test_imports():
-    """Test that main modules can be imported"""
-    try:
-        from torch_relativistic.gnn import RelativisticGraphConv
-        from torch_relativistic.snn import RelativisticLIFNeuron
-        from torch_relativistic.attention import RelativisticSelfAttention
-        from torch_relativistic.transforms import TerrellPenroseTransform
-        print("✅ All imports successful")
-    except ImportError as e:
-        pytest.fail(f"Import failed: {e}")
-
-
-def test_basic_functionality():
-    """Test basic functionality of main components"""
-    from torch_relativistic.gnn import RelativisticGraphConv
-    
-    # Test RelativisticGraphConv
-    conv = RelativisticGraphConv(16, 32)
-    x = torch.randn(10, 16)
-    edge_index = torch.tensor([[0, 1, 2], [1, 2, 0]], dtype=torch.long)
-    
-    try:
-        out = conv(x, edge_index)
-        assert out.shape == (10, 32), f"Expected shape (10, 32), got {out.shape}"
-        print("✅ RelativisticGraphConv works")
-    except Exception as e:
-        pytest.fail(f"RelativisticGraphConv failed: {e}")
-
-
-def test_version():
-    """Test that version is accessible"""
+@pytest.fixture
+def torch_relativistic_modules():
+    """Fixture für die wichtigsten Module"""
     import torch_relativistic
-    assert hasattr(torch_relativistic, '__version__')
-    assert torch_relativistic.__version__ == "0.1.2"
-    print(f"✅ Version is {torch_relativistic.__version__}")
+    return {
+        'main': torch_relativistic,
+        'gnn': importlib.util.find_spec('torch_relativistic.gnn'),
+        'snn': importlib.util.find_spec('torch_relativistic.snn'),
+        'attention': importlib.util.find_spec('torch_relativistic.attention'),
+        'transforms': importlib.util.find_spec('torch_relativistic.transforms'),
+        'utils': importlib.util.find_spec('torch_relativistic.utils')
+    }
 
 
-if __name__ == "__main__":
-    test_imports()
-    test_basic_functionality()
-    test_version()
-    print("🎉 All basic tests passed!")
+@pytest.fixture
+def torch_relativistic_classes():
+    """Fixture für die wichtigsten Klassen"""
+    from torch_relativistic.gnn import RelativisticGraphConv, MultiObserverGNN
+    from torch_relativistic.snn import RelativisticLIFNeuron, TerrellPenroseSNN
+    from torch_relativistic.attention import RelativisticSelfAttention
+    from torch_relativistic.transforms import TerrellPenroseTransform, LorentzBoost
+    from torch_relativistic.utils import lorentz_factor, LeviCivitaTensor
+
+    return {
+        'RelativisticGraphConv': RelativisticGraphConv,
+        'MultiObserverGNN': MultiObserverGNN,
+        'RelativisticLIFNeuron': RelativisticLIFNeuron,
+        'TerrellPenroseSNN': TerrellPenroseSNN,
+        'RelativisticSelfAttention': RelativisticSelfAttention,
+        'TerrellPenroseTransform': TerrellPenroseTransform,
+        'LorentzBoost': LorentzBoost,
+        'lorentz_factor': lorentz_factor,
+        'LeviCivitaTensor': LeviCivitaTensor
+    }
+
+
+class TestImports:
+    """Tests für die Import-Funktionalität"""
+
+    def test_module_imports(self, torch_relativistic_modules):
+        """Prüft, ob alle Module importiert werden können"""
+        for name, module in torch_relativistic_modules.items():
+            if name != 'main':
+                assert module is not None, f"Modul {name} konnte nicht importiert werden"
+
+    @pytest.mark.parametrize("class_name", [
+        "RelativisticGraphConv", "MultiObserverGNN", "RelativisticLIFNeuron",
+        "TerrellPenroseSNN", "RelativisticSelfAttention", "TerrellPenroseTransform",
+        "LorentzBoost"
+    ])
+    def test_class_instantiation(self, torch_relativistic_classes, class_name):
+        """Prüft, ob Klassen instanziiert werden können"""
+        cls = torch_relativistic_classes[class_name]
+
+        if class_name == "RelativisticGraphConv":
+            instance = cls(4, 8)
+        elif class_name == "MultiObserver
