@@ -4,11 +4,13 @@ version = "0.1.2"
 description = "A PyTorch extension that implements neural network components inspired by relativistic physics, particularly the Terrell-Penrose effect."
 readme = "README.md"
 authors = [
-    { name = "Björn Bethge", email = "" }
+    { name = "Björn Bethge", email = "your.email@example.com" }
 ]
 requires-python = ">=3.11"
 dependencies = [
+    "torch==2.7.0",
     "torch-geometric>=2.6.1",
+    "numpy>=1.20.0",
 ]
 
 [project.optional-dependencies]
@@ -18,6 +20,11 @@ dev = [
     "pytest>=8.3.5",
     "ruff>=0.11.9",
 ]
+
+[project.urls]
+Homepage = "https://github.com/bjoernbethge/torch-relativistic"
+Repository = "https://github.com/bjoernbethge/torch-relativistic"
+Documentation = "https://github.com/bjoernbethge/torch-relativistic#readme"
 
 [tool.uv]
 python-preference = "only-managed"
@@ -36,3 +43,12 @@ dev = [
     "pytest>=8.3.5",
     "ruff>=0.11.9",
 ]
+
+
+[[tool.uv.index]]
+name = "pytorch-cuda"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cuda" }]

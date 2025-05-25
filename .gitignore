@@ -1,0 +1,10 @@
+﻿# Default ignored files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pyw
+*.pyz
+
+.idea/
+
