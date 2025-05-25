@@ -7,7 +7,7 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-red.svg)](https://pytorch.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Tests](https://github.com/yourusername/torch-relativistic/actions/workflows/tests.yml/badge.svg)](https://github.com/yourusername/torch-relativistic/actions/workflows/tests.yml)
+[![Tests](https://github.com/bjoernbethge/torch-relativistic/actions/workflows/tests.yml/badge.svg)](https://github.com/bjoernbethge/torch-relativistic/actions/workflows/tests.yml)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
 <!-- Logo/Header -->
@@ -284,7 +284,7 @@ This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) 
 [![GitHub](https://img.shields.io/badge/GitHub-100000?style=for-the-badge&logo=github&logoColor=white)](https://github.com/yourusername/torch-relativistic)
 [![PyPI](https://img.shields.io/badge/PyPI-3775A9?style=for-the-badge&logo=pypi&logoColor=white)](https://pypi.org/project/torch-relativistic/)
 [![Documentation](https://img.shields.io/badge/Docs-4285F4?style=for-the-badge&logo=read-the-docs&logoColor=white)](https://torch-relativistic.readthedocs.io/)
-[![Email](https://img.shields.io/badge/Email-D14836?style=for-the-badge&logo=gmail&logoColor=white)](mailto:your.email@example.com)
+[![Email](https://img.shields.io/badge/Email-D14836?style=for-the-badge&logo=gmail&logoColor=white)](mailto:bjoern.bethge@gmail.com)
 
 **Made with ❤️ and ⚛️ physics**
 
