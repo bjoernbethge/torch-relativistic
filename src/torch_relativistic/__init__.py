@@ -13,13 +13,15 @@ Main components:
 - `transforms`: Relativistic space-time transforms for neural network features
 - `utils`: Utility functions for relativistic computations
 
-Authors: Claude AI
+Authors: Björn Bethge
 """
 
-from relativistic_torch.gnn import RelativisticGraphConv, MultiObserverGNN
-from relativistic_torch.snn import RelativisticLIFNeuron, TerrellPenroseSNN
-from relativistic_torch.attention import RelativisticSelfAttention
-from relativistic_torch.transforms import TerrellPenroseTransform
+__version__ = "0.1.2"
+
+from torch_relativistic.gnn import RelativisticGraphConv, MultiObserverGNN
+from torch_relativistic.snn import RelativisticLIFNeuron, TerrellPenroseSNN
+from torch_relativistic.attention import RelativisticSelfAttention
+from torch_relativistic.transforms import TerrellPenroseTransform
 
 __all__ = [
     'RelativisticGraphConv',
