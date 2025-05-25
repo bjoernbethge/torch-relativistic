@@ -21,12 +21,14 @@
 
 ## 🌟 Overview
 
-**torch-relativistic** provides neural network modules that incorporate concepts from **special relativity** into machine learning. The key insight is that the **Terrell-Penrose effect**, where rapidly moving objects appear rotated rather than contracted, can inspire revolutionary information processing paradigms in neural networks.
+**torch-relativistic** provides neural network modules that incorporate concepts from **special relativity** into
+machine learning. The key insight is that the **Terrell-Penrose effect**, where rapidly moving objects appear rotated
+rather than contracted, can inspire revolutionary information processing paradigms in neural networks.
 
 ### 🎯 Key Features
 
 - 🧠 **Relativistic Graph Neural Networks (GNNs)** - Process graphs with relativistic information propagation
-- ⚡ **Relativistic Spiking Neural Networks (SNNs)** - Time dilation effects in spiking neurons  
+- ⚡ **Relativistic Spiking Neural Networks (SNNs)** - Time dilation effects in spiking neurons
 - 🎭 **Relativistic Attention Mechanisms** - Multi-reference frame attention heads
 - 🌀 **Relativistic Transformations** - Lorentz boosts and Terrell-Penrose transforms
 - 🔬 **Physics-Inspired Architecture** - Grounded in real relativistic physics
@@ -36,11 +38,13 @@
 ## 📦 Installation
 
 ### Quick Install
+
 ```bash
 pip install torch-relativistic
 ```
 
 ### Development Install
+
 ```bash
 git clone https://github.com/yourusername/torch-relativistic.git
 cd torch-relativistic
@@ -48,8 +52,9 @@ pip install -e .
 ```
 
 ### Requirements
+
 - 🐍 Python ≥ 3.11
-- 🔥 PyTorch ≥ 2.0.0  
+- 🔥 PyTorch ≥ 2.0.0
 - 📊 PyTorch Geometric ≥ 2.6.1
 - 🔢 NumPy ≥ 1.20.0
 
@@ -221,6 +226,7 @@ print(f"Boosted shape: {boosted.shape}")  # [8, 8]
 ## 🧪 Development
 
 ### Running Tests
+
 ```bash
 # Install development dependencies
 pip install -e ".[dev]"
@@ -233,6 +239,7 @@ pytest tests/ --cov=torch_relativistic
 ```
 
 ### Code Quality
+
 ```bash
 # Format code
 black src/ tests/

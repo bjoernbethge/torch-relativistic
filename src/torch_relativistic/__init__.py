@@ -31,3 +31,12 @@ __all__ = [
     'RelativisticSelfAttention',
     'TerrellPenroseTransform',
 ]
+
+# Typing support for mypy
+if False:
+    from .gnn import RelativisticGraphConv, MultiObserverGNN
+    from .snn import RelativisticLIFNeuron, TerrellPenroseSNN
+    from .attention import RelativisticSelfAttention
+    from .transforms import TerrellPenroseTransform
+
+# Hinweis für mypy: torch_geometric hat keine Typ-Stubs, daher ggf. type: ignore[import-untyped] in gnn.py verwenden.

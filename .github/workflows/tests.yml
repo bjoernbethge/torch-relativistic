@@ -11,34 +11,34 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.11", "3.12"]
+        python-version: [ "3.11", "3.12" ]
 
     steps:
-    - uses: actions/checkout@v4
-    
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v5
-      with:
-        python-version: ${{ matrix.python-version }}
-    
-    - name: Install uv
-      run: |
-        curl -LsSf https://astral.sh/uv/install.sh | sh
-        echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-    
-    - name: Install dependencies
-      run: |
-        uv sync --dev
-    
-    - name: Run tests
-      run: |
-        uv run pytest tests/ -v
-    
-    - name: Run type checking
-      run: |
-        uv run mypy src/
-    
-    - name: Run linting
-      run: |
-        uv run ruff check src/ tests/
-        uv run black --check src/ tests/
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Install dependencies
+        run: |
+          uv sync --dev
+
+      - name: Run tests
+        run: |
+          uv run pytest tests/ -v
+
+      - name: Run type checking
+        run: |
+          uv run mypy src/
+
+      - name: Run linting
+        run: |
+          uv run ruff check src/ tests/
+          uv run black --check src/ tests/

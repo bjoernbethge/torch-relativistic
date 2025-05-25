@@ -2,7 +2,8 @@
 # Runs uv sync and installs the appropriate CUDA-Wheel for torch
 
 # Check for uv
-if (!(Get-Command uv -ErrorAction SilentlyContinue)) {
+if (!(Get-Command uv -ErrorAction SilentlyContinue))
+{
     Write-Host "uv not found. Install uv first."
     exit
 }
