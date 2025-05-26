@@ -2,7 +2,7 @@
 Visualization tools for space datasets with relativistic effects.
 """
 
-from typing import Dict, List, Optional, Tuple, Any, Union
+from typing import List, Optional
 from pathlib import Path
 import numpy as np
 import pandas as pd
@@ -10,10 +10,7 @@ import polars as pl
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-import plotly.offline as pyo
 from dataclasses import dataclass
-from datetime import datetime
-import torch
 from torch_geometric.data import Data
 
 
@@ -54,11 +51,6 @@ class SpaceDataVisualizer:
                     'zeroline': False
                 },
                 'yaxis': {
-                    'gridcolor': self.config.grid_color,
-                    'showgrid': self.config.show_grid,
-                    'zeroline': False
-                },
-                'zaxis': {
                     'gridcolor': self.config.grid_color,
                     'showgrid': self.config.show_grid,
                     'zeroline': False
@@ -286,52 +278,98 @@ class SpaceDataVisualizer:
         title: str = "Orbital Elements Analysis"
     ) -> go.Figure:
         """Plot orbital elements like inclination, eccentricity, etc."""
-        if not any(col in df.columns for col in ['inclination_deg', 'eccentricity', 'altitude_km']):
+        if not any(col in df.columns for col in ['inclination_deg', 'eccentricity', 'mean_motion', 'raan_deg']):
             raise ValueError("Orbital elements not found in DataFrame")
         
         df_pandas = df.to_pandas()
         
+        # Calculate altitude from mean motion if available
+        if 'mean_motion' in df_pandas.columns and 'altitude_km' not in df_pandas.columns:
+            # Convert mean motion (revolutions per day) to altitude
+            # Using simplified formula: n = sqrt(GM/a^3) where n is mean motion
+            mu_earth = 3.986004418e14  # m^3/s^2
+            
+            # Convert revolutions/day to radians/second
+            mean_motion_rad_s = df_pandas['mean_motion'] * 2 * np.pi / 86400
+            
+            # Calculate semi-major axis: a = (GM/n^2)^(1/3)
+            semi_major_axis_m = (mu_earth / (mean_motion_rad_s**2))**(1/3)
+            
+            # Convert to altitude (subtract Earth's radius)
+            earth_radius_km = 6371.0
+            df_pandas['altitude_km'] = (semi_major_axis_m / 1000) - earth_radius_km
+        
         # Create subplots for different orbital elements
-        fig = make_subplots(
-            rows=2, cols=2,
-            subplot_titles=('Inclination Distribution', 'Eccentricity Distribution', 
-                          'Altitude Distribution', 'Inclination vs Eccentricity'),
-            specs=[[{"type": "histogram"}, {"type": "histogram"}],
-                   [{"type": "histogram"}, {"type": "scatter"}]]
-        )
+        subplot_titles = []
+        has_inclination = 'inclination_deg' in df_pandas.columns
+        has_eccentricity = 'eccentricity' in df_pandas.columns  
+        has_altitude = 'altitude_km' in df_pandas.columns
+        has_raan = 'raan_deg' in df_pandas.columns
         
-        # Inclination
-        if 'inclination_deg' in df_pandas.columns:
-            fig.add_trace(
-                go.Histogram(x=df_pandas['inclination_deg'], name='Inclination', 
-                           marker_color=px.colors.qualitative.Set3[0]),
-                row=1, col=1
+        # Determine which plots to show
+        plots_config = []
+        if has_inclination:
+            plots_config.append(('inclination_deg', 'Inclination Distribution'))
+        if has_eccentricity:
+            plots_config.append(('eccentricity', 'Eccentricity Distribution'))
+        if has_altitude:
+            plots_config.append(('altitude_km', 'Altitude Distribution'))
+        if has_raan:
+            plots_config.append(('raan_deg', 'RAAN Distribution'))
+        
+        # Create subplot grid based on available data
+        if len(plots_config) >= 4:
+            fig = make_subplots(
+                rows=2, cols=2,
+                subplot_titles=[config[1] for config in plots_config[:4]],
+                specs=[[{"type": "histogram"}, {"type": "histogram"}],
+                       [{"type": "histogram"}, {"type": "scatter"}]]
+            )
+        elif len(plots_config) == 3:
+            fig = make_subplots(
+                rows=2, cols=2,
+                subplot_titles=[plots_config[0][1], plots_config[1][1], plots_config[2][1], 'Inclination vs Eccentricity'],
+                specs=[[{"type": "histogram"}, {"type": "histogram"}],
+                       [{"type": "histogram"}, {"type": "scatter"}]]
+            )
+        else:
+            fig = make_subplots(
+                rows=1, cols=len(plots_config),
+                subplot_titles=[config[1] for config in plots_config]
             )
         
-        # Eccentricity
-        if 'eccentricity' in df_pandas.columns:
-            fig.add_trace(
-                go.Histogram(x=df_pandas['eccentricity'], name='Eccentricity',
-                           marker_color=px.colors.qualitative.Set3[1]),
-                row=1, col=2
-            )
+        # Add histogram plots
+        colors = px.colors.qualitative.Set3
         
-        # Altitude
-        if 'altitude_km' in df_pandas.columns:
-            fig.add_trace(
-                go.Histogram(x=df_pandas['altitude_km'], name='Altitude',
-                           marker_color=px.colors.qualitative.Set3[2]),
-                row=2, col=1
-            )
-        
-        # Scatter plot
-        if all(col in df_pandas.columns for col in ['inclination_deg', 'eccentricity']):
-            fig.add_trace(
-                go.Scatter(x=df_pandas['inclination_deg'], y=df_pandas['eccentricity'],
-                          mode='markers', name='Inc vs Ecc',
-                          marker=dict(color=px.colors.qualitative.Set3[3])),
-                row=2, col=2
-            )
+        if len(plots_config) >= 4:
+            # 2x2 grid
+            positions = [(1, 1), (1, 2), (2, 1), (2, 2)]
+            for i, (col_name, title) in enumerate(plots_config[:3]):
+                row, col = positions[i]
+                if col_name in df_pandas.columns:
+                    fig.add_trace(
+                        go.Histogram(x=df_pandas[col_name], name=title,
+                                   marker_color=colors[i % len(colors)]),
+                        row=row, col=col
+                    )
+            
+            # Add scatter plot in position 4
+            if has_inclination and has_eccentricity:
+                fig.add_trace(
+                    go.Scatter(x=df_pandas['inclination_deg'], y=df_pandas['eccentricity'],
+                              mode='markers', name='Inc vs Ecc',
+                              marker=dict(color=colors[3 % len(colors)])),
+                    row=2, col=2
+                )
+        else:
+            # Single row
+            for i, (col_name, title) in enumerate(plots_config):
+                if col_name in df_pandas.columns:
+                    fig.add_trace(
+                        go.Histogram(x=df_pandas[col_name], name=title,
+                                   marker_color=colors[i % len(colors)]),
+                        row=1, col=i+1
+                    )
         
         fig.update_layout(
             **self.theme_template['layout'],
