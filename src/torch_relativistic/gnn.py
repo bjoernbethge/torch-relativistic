@@ -18,7 +18,7 @@ from .utils import calculate_gamma, clamp_velocity
 
 # For PyTorch Geometric compatibility - gracefully handle if not available
 try:
-    from torch_geometric.nn import MessagePassing  # type: ignore[import-untyped]
+    from torch_geometric.nn import MessagePassing
 
     HAS_PYGEOMETRIC = True
 except ImportError:

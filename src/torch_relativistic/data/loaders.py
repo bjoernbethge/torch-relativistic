@@ -420,8 +420,8 @@ class SatelliteConstellationDataset(BaseSpaceDataset):
         
         print(f"DEBUG: Available columns: {list(data_dicts[0].keys())}")
         
-        positions = []
-        velocities = []
+        positions: List[List[float]] = []
+        velocities: List[List[float]] = []
         
         # Check if we have position/velocity data or need to convert from orbital elements
         has_cartesian = all(col in data_dicts[0] for col in ['x_km', 'y_km', 'z_km'])
@@ -480,46 +480,47 @@ class SatelliteConstellationDataset(BaseSpaceDataset):
                 velocities.append([vx, vy, vz])
         
         # Convert to tensors with consistent dimensions
-        positions = torch.tensor(positions, dtype=torch.float32) * 1000  # Convert to meters
-        velocities = torch.tensor(velocities, dtype=torch.float32) * 1000  # Convert to m/s
+        positions_tensor = torch.tensor(positions, dtype=torch.float32) * 1000  # Convert to meters
+        velocities_tensor = torch.tensor(velocities, dtype=torch.float32) * 1000  # Convert to m/s
         
-        print(f"DEBUG: positions shape: {positions.shape}, velocities shape: {velocities.shape}")
+        print(f"DEBUG: positions shape: {positions_tensor.shape}, velocities shape: {velocities_tensor.shape}")
         
         # Ensure we have at least minimum number of nodes
-        if positions.shape[0] < self.config.min_satellites:
+        if positions_tensor.shape[0] < self.config.min_satellites:
             # Pad with synthetic nodes if needed
-            while positions.shape[0] < self.config.min_satellites:
+            while positions_tensor.shape[0] < self.config.min_satellites:
                 # Add a synthetic satellite at a slightly different position
-                base_pos = positions[-1] if len(positions) > 0 else torch.zeros(3)
+                base_pos = positions_tensor[-1] if len(positions_tensor) > 0 else torch.zeros(3)
                 new_pos = base_pos + torch.randn(3) * 1000  # Add 1km random offset
                 new_vel = torch.randn(3) * 1000  # Random velocity ~1 km/s
                 
-                positions = torch.cat([positions, new_pos.unsqueeze(0)], dim=0)
-                velocities = torch.cat([velocities, new_vel.unsqueeze(0)], dim=0)
+                positions_tensor = torch.cat([positions_tensor, new_pos.unsqueeze(0)], dim=0)
+                velocities_tensor = torch.cat([velocities_tensor, new_vel.unsqueeze(0)], dim=0)
         
-        print(f"DEBUG: After padding - positions shape: {positions.shape}, velocities shape: {velocities.shape}")
+        print(f"DEBUG: After padding - positions shape: {positions_tensor.shape}, velocities shape: {velocities_tensor.shape}")
         
         # Create node features
         try:
-            node_features = self.feature_extractor.extract_node_features(positions, velocities)
+            node_features = self.feature_extractor.extract_node_features(positions_tensor, velocities_tensor)
             print(f"DEBUG: node_features shape: {node_features.shape}")
         except Exception as e:
             print(f"ERROR in extract_node_features: {e}")
             raise
         
         # Create edges based on distance
-        edge_index, basic_edge_attr = self.create_edges_from_positions(positions)
+        edge_index, basic_edge_attr = self.create_edges_from_positions(positions_tensor)
         print(f"DEBUG: edge_index shape: {edge_index.shape}")
         
         # Enhanced edge features with relativistic effects
         if edge_index.shape[1] > 0:
             enhanced_edge_attr = []
             for i in range(edge_index.shape[1]):
-                src, dst = edge_index[0, i].item(), edge_index[1, i].item()
+                src_idx = int(edge_index[0, i].item())
+                dst_idx = int(edge_index[1, i].item())
                 try:
                     edge_feat = self.feature_extractor.extract_edge_features(
-                        positions[src:src+1], positions[dst:dst+1],
-                        velocities[src:src+1], velocities[dst:dst+1]
+                        positions_tensor[src_idx:src_idx+1], positions_tensor[dst_idx:dst_idx+1],
+                        velocities_tensor[src_idx:src_idx+1], velocities_tensor[dst_idx:dst_idx+1]
                     )
                     enhanced_edge_attr.append(edge_feat)
                 except Exception as e:

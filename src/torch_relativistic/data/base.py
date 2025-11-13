@@ -6,7 +6,7 @@ import torch
 import torch.nn.functional as F
 from torch_geometric.data import Data, Dataset
 from torch_geometric.utils import add_self_loops, degree
-from typing import Optional, Tuple, Dict, List, Any, Union
+from typing import Optional, Tuple, Dict, List, Any, Union, Callable
 import numpy as np
 from abc import ABC, abstractmethod
 import logging
@@ -161,9 +161,9 @@ class BaseRelativisticDataset(Dataset, ABC):
     
     def __init__(self, 
                  root: str,
-                 transform: Optional[callable] = None,
-                 pre_transform: Optional[callable] = None,
-                 pre_filter: Optional[callable] = None):
+                 transform: Optional[Callable] = None,
+                 pre_transform: Optional[Callable] = None,
+                 pre_filter: Optional[Callable] = None):
         """
         Initialize base relativistic dataset.
         

@@ -63,6 +63,8 @@ class RelativisticDataProcessor:
         for col in numeric_cols:
             q1 = df[col].quantile(0.25)
             q3 = df[col].quantile(0.75)
+            if q1 is None or q3 is None:
+                continue
             iqr = q3 - q1
             lower_bound = q1 - self.config.outlier_threshold * iqr
             upper_bound = q3 + self.config.outlier_threshold * iqr
@@ -132,11 +134,23 @@ class RelativisticDataProcessor:
             mean_val = df[col].mean()
             std_val = df[col].std()
             
-            # Store stats for later denormalization
-            self.feature_stats[col] = {'mean': mean_val, 'std': std_val}
+            # Ensure values are not None and are numeric
+            if mean_val is None or std_val is None:
+                continue
             
-            if std_val > 1e-8:  # Avoid division by zero
-                normalized_col = (pl.col(col) - mean_val) / std_val
+            # Convert to float if needed, handling various types from polars
+            try:
+                mean_float = float(mean_val) if not isinstance(mean_val, (int, float)) else float(mean_val)  # type: ignore[arg-type]
+                std_float = float(std_val) if not isinstance(std_val, (int, float)) else float(std_val)  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                # Skip columns that can't be converted to float
+                continue
+            
+            # Store stats for later denormalization
+            self.feature_stats[col] = {'mean': mean_float, 'std': std_float}
+            
+            if std_float > 1e-8:  # Avoid division by zero
+                normalized_col = (pl.col(col) - mean_float) / std_float
                 df = df.with_columns(normalized_col.alias(col))
         
         return df
@@ -308,8 +322,8 @@ class NormalizationTransform(BaseTransform):
     def fit(self, data_list: List[Data]):
         """Fit normalization parameters on a list of data."""
         # Collect all node features
-        all_node_features = []
-        all_edge_features = []
+        all_node_features: List[Tensor] = []
+        all_edge_features: List[Tensor] = []
         
         for data in data_list:
             if data.x is not None:
@@ -318,14 +332,14 @@ class NormalizationTransform(BaseTransform):
                 all_edge_features.append(data.edge_attr)
         
         if all_node_features:
-            all_node_features = torch.cat(all_node_features, dim=0)
-            self.node_mean = all_node_features.mean(dim=0)
-            self.node_std = all_node_features.std(dim=0) + 1e-8
+            all_node_features_tensor = torch.cat(all_node_features, dim=0)
+            self.node_mean = all_node_features_tensor.mean(dim=0)
+            self.node_std = all_node_features_tensor.std(dim=0) + 1e-8
         
         if all_edge_features:
-            all_edge_features = torch.cat(all_edge_features, dim=0)
-            self.edge_mean = all_edge_features.mean(dim=0)
-            self.edge_std = all_edge_features.std(dim=0) + 1e-8
+            all_edge_features_tensor = torch.cat(all_edge_features, dim=0)
+            self.edge_mean = all_edge_features_tensor.mean(dim=0)
+            self.edge_std = all_edge_features_tensor.std(dim=0) + 1e-8
         
         self.fitted = True
     
