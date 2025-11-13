@@ -1,7 +1,7 @@
 """
 Utility functions for relativistic neural network operations.
 
-This module provides helper functions and utilities for implementing 
+This module provides helper functions and utilities for implementing
 relativistic concepts in neural networks, particularly those inspired
 by the Terrell-Penrose effect.
 """
@@ -13,46 +13,82 @@ import torch
 from torch import Tensor
 
 
-def lorentz_factor(velocity: Tensor) -> Tensor:
+def clamp_velocity(
+    velocity: Tensor, max_velocity: float = 0.999, min_velocity: float = 0.0
+) -> Tensor:
     """
-    Calculate the Lorentz factor (gamma) for a given velocity.
-    
-    The Lorentz factor is a key quantity in special relativity that appears
-    in various relativistic effects like time dilation and length contraction.
-    
+    Clamp velocity to valid relativistic range.
+
+    Ensures velocity stays below the speed of light and above minimum value.
+
     Args:
         velocity (Tensor): Velocity as a fraction of the speed of light (c)
-                           Either a scalar or vector.
-                           
+        max_velocity (float): Maximum allowed velocity (default: 0.999)
+        min_velocity (float): Minimum allowed velocity (default: 0.0)
+
+    Returns:
+        Tensor: Clamped velocity
+    """
+    return torch.clamp(velocity, min_velocity, max_velocity)
+
+
+def calculate_gamma(velocity: Tensor, eps: float = 1e-8) -> Tensor:
+    """
+    Calculate the Lorentz factor (gamma) with proper clamping and numerical stability.
+
+    This is a convenience wrapper that clamps velocity and adds numerical stability.
+
+    Args:
+        velocity (Tensor): Velocity as a fraction of the speed of light (c)
+        eps (float): Epsilon for numerical stability (default: 1e-8)
+
     Returns:
         Tensor: Lorentz factor γ = 1/√(1-v²)
     """
-    # Handle scalar or vector velocity
-    if velocity.dim() == 0:
-        v_squared = velocity ** 2
+    # Clamp velocity to valid range
+    v_clamped = clamp_velocity(velocity)
+
+    # Handle scalar or vector velocity for squared calculation
+    if v_clamped.dim() == 0 or v_clamped.shape[-1] == 1:
+        v_squared = v_clamped**2
     else:
-        v_squared = torch.sum(velocity ** 2, dim=-1)
+        v_squared = torch.sum(v_clamped**2, dim=-1, keepdim=v_clamped.dim() > 1)
 
-    # Ensure v_squared is less than 1 (speed of light)
-    v_squared = torch.clamp(v_squared, 0.0, 0.999)
-
-    # Calculate gamma
-    gamma = 1.0 / torch.sqrt(1.0 - v_squared)
+    # Calculate gamma with numerical stability
+    gamma = 1.0 / torch.sqrt(1.0 - v_squared + eps)
 
     return gamma
+
+
+def lorentz_factor(velocity: Tensor) -> Tensor:
+    """
+    Calculate the Lorentz factor (gamma) for a given velocity.
+
+    The Lorentz factor is a key quantity in special relativity that appears
+    in various relativistic effects like time dilation and length contraction.
+
+    Args:
+        velocity (Tensor): Velocity as a fraction of the speed of light (c)
+                           Either a scalar or vector.
+
+    Returns:
+        Tensor: Lorentz factor γ = 1/√(1-v²)
+    """
+    # Use the new calculate_gamma function for consistency
+    return calculate_gamma(velocity)
 
 
 def lorentz_contraction(length: Tensor, velocity: Tensor) -> Tensor:
     """
     Calculate the Lorentz-contracted length of an object.
-    
+
     In special relativity, the length of an object moving relative to an observer
     appears contracted along the direction of motion.
-    
+
     Args:
         length (Tensor): Proper length of the object (length in its rest frame)
         velocity (Tensor): Velocity as a fraction of light speed
-        
+
     Returns:
         Tensor: Contracted length
     """
@@ -64,14 +100,14 @@ def lorentz_contraction(length: Tensor, velocity: Tensor) -> Tensor:
 def time_dilation(time: Tensor, velocity: Tensor) -> Tensor:
     """
     Calculate the dilated time due to relativistic effects.
-    
+
     In special relativity, time appears to pass more slowly for observers in motion
     relative to another reference frame.
-    
+
     Args:
         time (Tensor): Proper time (time in the rest frame)
         velocity (Tensor): Velocity as a fraction of light speed
-        
+
     Returns:
         Tensor: Dilated time
     """
@@ -83,14 +119,14 @@ def time_dilation(time: Tensor, velocity: Tensor) -> Tensor:
 def velocity_addition(v1: Tensor, v2: Tensor) -> Tensor:
     """
     Compute the relativistic addition of velocities.
-    
+
     The relativistic velocity addition formula differs from the classical vector
     addition and ensures that velocities don't exceed the speed of light.
-    
+
     Args:
         v1 (Tensor): First velocity (fraction of c)
         v2 (Tensor): Second velocity (fraction of c)
-        
+
     Returns:
         Tensor: Resultant velocity according to relativistic addition
     """
@@ -105,7 +141,9 @@ def velocity_addition(v1: Tensor, v2: Tensor) -> Tensor:
         v2_unit = v2 / (v2_mag + 1e-8)
 
         # Special case: parallel velocities
-        if torch.allclose(v1_unit, v2_unit, atol=1e-6) or torch.allclose(v1_unit, -v2_unit, atol=1e-6):
+        if torch.allclose(v1_unit, v2_unit, atol=1e-6) or torch.allclose(
+            v1_unit, -v2_unit, atol=1e-6
+        ):
             # Use scalar formula for parallel velocities
             dot_product = torch.sum(v1_unit * v2_unit)
             signed_v2_mag = v2_mag * dot_product
@@ -122,7 +160,9 @@ def velocity_addition(v1: Tensor, v2: Tensor) -> Tensor:
 
         # Apply relativistic velocity addition to parallel component
         gamma1 = lorentz_factor(v1_mag)
-        v_parallel_resultant = (v2_parallel + v1) / (1 + torch.sum(v2_parallel * v1) / (v1_mag + 1e-8))
+        v_parallel_resultant = (v2_parallel + v1) / (
+            1 + torch.sum(v2_parallel * v1) / (v1_mag + 1e-8)
+        )
 
         # Transform perpendicular component
         v_perp_resultant = v2_perp / gamma1
@@ -136,20 +176,22 @@ def velocity_addition(v1: Tensor, v2: Tensor) -> Tensor:
         return (v1 + v2) / (1 + v1 * v2)
 
 
-def relativistic_doppler_factor(velocity: Tensor, observer_angle: Optional[Tensor] = None) -> Tensor:
+def relativistic_doppler_factor(
+    velocity: Tensor, observer_angle: Optional[Tensor] = None
+) -> Tensor:
     """
     Calculate the relativistic Doppler factor.
-    
+
     The Doppler factor determines how frequencies are shifted for an observer
     in relative motion. In the Terrell-Penrose effect, different parts of a moving
     object experience different Doppler shifts, affecting their appearance.
-    
+
     Args:
         velocity (Tensor): Velocity as a fraction of light speed
-        observer_angle (Tensor, optional): Angle between velocity vector and 
-                                           line of sight (radians). 
+        observer_angle (Tensor, optional): Angle between velocity vector and
+                                           line of sight (radians).
                                            Defaults to None (assumes head-on observation).
-        
+
     Returns:
         Tensor: Doppler factor
     """
@@ -164,16 +206,45 @@ def relativistic_doppler_factor(velocity: Tensor, observer_angle: Optional[Tenso
         return gamma * (1 - velocity * cos_angle)
 
 
+def calculate_delay_factors(
+    distances: Tensor, velocity: Tensor, gamma: Optional[Tensor] = None
+) -> Tensor:
+    """
+    Calculate relativistic delay factors based on causal distances.
+
+    This is used in relativistic neural networks to model signal arrival delays
+    due to finite signal propagation speed.
+
+    Args:
+        distances (Tensor): Causal distances between components
+        velocity (Tensor): Relativistic velocity parameter
+        gamma (Tensor, optional): Pre-computed Lorentz factor. If None, will be calculated.
+
+    Returns:
+        Tensor: Delay factors (exponentially attenuated based on arrival times)
+    """
+    if gamma is None:
+        gamma = calculate_gamma(velocity)
+
+    # Calculate relativistic arrival delays
+    arrival_delays = gamma * torch.abs(distances) * velocity
+
+    # Exponential attenuation with delay
+    delay_factors = torch.exp(-arrival_delays)
+
+    return delay_factors
+
+
 def terrell_rotation_angle(velocity: Tensor) -> Tensor:
     """
     Calculate the apparent rotation angle from the Terrell-Penrose effect.
-    
+
     In the Terrell-Penrose effect, a rapidly moving object appears rotated
     rather than contracted. This function calculates the apparent rotation angle.
-    
+
     Args:
         velocity (Tensor): Velocity as a fraction of light speed
-        
+
     Returns:
         Tensor: Approximate rotation angle in radians
     """
@@ -181,7 +252,7 @@ def terrell_rotation_angle(velocity: Tensor) -> Tensor:
 
     # Simple approximation formula for the apparent rotation
     # This is a simplified version; the exact effect is more complex
-    angle = torch.atan(velocity / torch.sqrt(1.0 - velocity ** 2))
+    angle = torch.atan(velocity / torch.sqrt(1.0 - velocity**2))
 
     return angle
 
@@ -189,16 +260,16 @@ def terrell_rotation_angle(velocity: Tensor) -> Tensor:
 def lorentz_transform_spacetime(coordinates: Tensor, velocity: Tensor) -> Tensor:
     """
     Apply Lorentz transformation to spacetime coordinates.
-    
+
     The Lorentz transformation describes how spacetime coordinates transform
     between reference frames in relative motion.
-    
+
     Args:
         coordinates (Tensor): Spacetime coordinates [batch, ..., 4]
                              where the last dimension is (t, x, y, z)
         velocity (Tensor): Relative velocity as a 3D vector [vx, vy, vz]
                           representing fraction of light speed
-        
+
     Returns:
         Tensor: Transformed spacetime coordinates
     """
@@ -232,9 +303,11 @@ def lorentz_transform_spacetime(coordinates: Tensor, velocity: Tensor) -> Tensor
     # First term: perpendicular component unchanged
     # Second term: parallel component transformation
     # Third term: time contribution
-    x_prime = x + \
-              (gamma - 1) * x_dot_v.unsqueeze(-1) * v_normalized / (v_magnitude ** 2 + 1e-8) - \
-              gamma * t.unsqueeze(-1) * velocity
+    x_prime = (
+        x
+        + (gamma - 1) * x_dot_v.unsqueeze(-1) * v_normalized / (v_magnitude**2 + 1e-8)
+        - gamma * t.unsqueeze(-1) * velocity
+    )
 
     # Combine transformed coordinates
     transformed = torch.cat([t_prime.unsqueeze(-1), x_prime], dim=-1)
@@ -246,14 +319,14 @@ def lorentz_transform_spacetime(coordinates: Tensor, velocity: Tensor) -> Tensor
 def create_rotation_matrix_from_vectors(v1: Tensor, v2: Tensor) -> Tensor:
     """
     Create a 3D rotation matrix that rotates v1 to align with v2.
-    
+
     This is useful for implementing relativistic transformations where the
     rotation axis depends on the relative orientation of objects.
-    
+
     Args:
         v1 (Tensor): Source vector [3]
         v2 (Tensor): Target vector [3]
-        
+
     Returns:
         Tensor: 3x3 rotation matrix
     """
@@ -277,7 +350,9 @@ def create_rotation_matrix_from_vectors(v1: Tensor, v2: Tensor) -> Tensor:
         axis = axis / (torch.norm(axis) + 1e-8)
 
         # Create rotation matrix for 180 degrees around axis
-        return rotation_matrix_from_axis_angle(axis, torch.tensor(math.pi, device=axis.device))
+        return rotation_matrix_from_axis_angle(
+            axis, torch.tensor(math.pi, device=axis.device)
+        )
 
     # General case: Rodrigues' rotation formula
     # 1. Find rotation axis (cross product)
@@ -295,11 +370,11 @@ def create_rotation_matrix_from_vectors(v1: Tensor, v2: Tensor) -> Tensor:
 def rotation_matrix_from_axis_angle(axis: Tensor, angle: Tensor) -> Tensor:
     """
     Create a rotation matrix from an axis and angle.
-    
+
     Args:
         axis (Tensor): Rotation axis (normalized)
         angle (Tensor): Rotation angle in radians
-        
+
     Returns:
         Tensor: 3x3 rotation matrix
     """
@@ -321,10 +396,10 @@ def rotation_matrix_from_axis_angle(axis: Tensor, angle: Tensor) -> Tensor:
 class SphericalHarmonics:
     """
     Compute spherical harmonics for relativistic feature transformations.
-    
+
     Spherical harmonics are useful for representing functions on the sphere
     and can be used to implement relativistic transformations efficiently.
-    
+
     Args:
         max_degree (int): Maximum degree of spherical harmonics
         device (torch.device, optional): Device to use. Defaults to None.
@@ -337,13 +412,13 @@ class SphericalHarmonics:
     def evaluate(self, theta: Tensor, phi: Tensor) -> Dict[Tuple[int, int], Tensor]:
         """
         Evaluate spherical harmonics at given angles.
-        
+
         Args:
             theta (Tensor): Polar angle in radians [0, π]
             phi (Tensor): Azimuthal angle in radians [0, 2π]
-            
+
         Returns:
-            Dict[Tuple[int, int], Tensor]: Dictionary mapping (l, m) to 
+            Dict[Tuple[int, int], Tensor]: Dictionary mapping (l, m) to
                                          spherical harmonic values Y_l^m(θ, φ)
         """
         result = {}
@@ -356,16 +431,18 @@ class SphericalHarmonics:
 
         return result
 
-    def _eval_single(self, degree: int, order: int, theta: Tensor, phi: Tensor) -> Tensor:
+    def _eval_single(
+        self, degree: int, order: int, theta: Tensor, phi: Tensor
+    ) -> Tensor:
         """
         Evaluate a single spherical harmonic Y_l^m(θ, φ).
-        
+
         Args:
             degree (int): Degree
             order (int): Order
             theta (Tensor): Polar angle
             phi (Tensor): Azimuthal angle
-            
+
         Returns:
             Tensor: Values of Y_l^m(θ, φ)
         """
@@ -389,8 +466,11 @@ class SphericalHarmonics:
         if order == 0:
             norm = math.sqrt((2 * degree + 1) / (4 * math.pi))
         else:
-            norm = math.sqrt((2 * degree + 1) * math.factorial(degree - abs(order)) /
-                             (2 * math.pi * math.factorial(degree + abs(order))))
+            norm = math.sqrt(
+                (2 * degree + 1)
+                * math.factorial(degree - abs(order))
+                / (2 * math.pi * math.factorial(degree + abs(order)))
+            )
             norm *= math.sqrt(2)  # For real spherical harmonics
 
         # Combine to get the spherical harmonic
@@ -401,12 +481,12 @@ class SphericalHarmonics:
     def _associated_legendre(self, degree: int, order: int, x: Tensor) -> Tensor:
         """
         Compute the associated Legendre polynomial P_l^m(x).
-        
+
         Args:
             degree (int): Degree
             order (int): Order
             x (Tensor): Input values (cos θ)
-            
+
         Returns:
             Tensor: P_l^m(x)
         """
@@ -423,7 +503,7 @@ class SphericalHarmonics:
             # P_m^m(x) = (-1)^m * (2m-1)!! * (1-x²)^(m/2)
             factor = 1.0
             for i in range(1, order + 1):
-                factor *= (2 * i - 1)
+                factor *= 2 * i - 1
 
             result = factor * torch.pow(1.0 - x * x, order / 2.0)
             if order % 2 == 1:
@@ -447,10 +527,10 @@ class SphericalHarmonics:
 class LeviCivitaTensor:
     """
     Levi-Civita tensor implementation for relativistic operations.
-    
+
     The Levi-Civita tensor is useful for implementing cross products and
     rotational transformations in neural network operations.
-    
+
     Args:
         dim (int): Dimensionality of the tensor (3 or 4)
         device (torch.device, optional): Device to use. Defaults to None.
@@ -464,7 +544,7 @@ class LeviCivitaTensor:
     def _create_tensor(self) -> Tensor:
         """
         Create the Levi-Civita tensor.
-        
+
         Returns:
             Tensor: Levi-Civita tensor of shape [dim, dim, dim] or [dim, dim, dim, dim]
         """
@@ -496,7 +576,14 @@ class LeviCivitaTensor:
                     for k in range(4):
                         for l4 in range(4):
                             # Skip if any indices are equal (εijkl = 0 if any two indices are equal)
-                            if i == j or i == k or i == l4 or j == k or j == l4 or k == l4:
+                            if (
+                                i == j
+                                or i == k
+                                or i == l4
+                                or j == k
+                                or j == l4
+                                or k == l4
+                            ):
                                 continue
 
                             # Create permutation and get sign
@@ -519,10 +606,10 @@ class LeviCivitaTensor:
     def __call__(self, *indices: int) -> Tensor:
         """
         Get the value of the Levi-Civita tensor for specific indices.
-        
+
         Args:
             *indices: Indices to access
-            
+
         Returns:
             Tensor: Value at the specified indices
         """
@@ -531,14 +618,14 @@ class LeviCivitaTensor:
     def contract(self, tensor: Tensor, dim1: int, dim2: int) -> Tensor:
         """
         Contract the Levi-Civita tensor with another tensor.
-        
+
         This operation is useful for implementing cross products and curl operations.
-        
+
         Args:
             tensor (Tensor): Tensor to contract with
             dim1 (int): First dimension to contract
             dim2 (int): Second dimension to contract
-            
+
         Returns:
             Tensor: Contracted tensor
         """
@@ -570,7 +657,9 @@ class LeviCivitaTensor:
                 return result
 
             else:
-                raise ValueError(f"Unsupported tensor shape for 3D contraction: {tensor.shape}")
+                raise ValueError(
+                    f"Unsupported tensor shape for 3D contraction: {tensor.shape}"
+                )
 
         elif self.dim == 4:
             # 4D contractions are more complex and depend on the specific use case
@@ -582,17 +671,19 @@ class LeviCivitaTensor:
 class MinkowskiMetric:
     """
     Minkowski metric for relativistic spacetime operations.
-    
+
     The Minkowski metric is fundamental in special relativity for calculating
     spacetime intervals and implementing Lorentz transformations.
-    
+
     Args:
         signature (str, optional): Metric signature. Defaults to "mostly_minus".
                                    Options: "mostly_minus" (-,+,+,+) or "mostly_plus" (+,-,-,-).
         device (torch.device, optional): Device to use. Defaults to None.
     """
 
-    def __init__(self, signature: str = "mostly_minus", device: Optional[torch.device] = None):
+    def __init__(
+        self, signature: str = "mostly_minus", device: Optional[torch.device] = None
+    ):
         self.signature = signature
         self.device = device
         self._metric = self._create_metric()
@@ -600,29 +691,29 @@ class MinkowskiMetric:
     def _create_metric(self) -> Tensor:
         """
         Create the Minkowski metric tensor.
-        
+
         Returns:
             Tensor: 4x4 Minkowski metric tensor
         """
         if self.signature == "mostly_minus":
             # (-,+,+,+) signature: g_μν = diag(-1, 1, 1, 1)
-            return torch.diag(torch.tensor([-1., 1., 1., 1.], device=self.device))
+            return torch.diag(torch.tensor([-1.0, 1.0, 1.0, 1.0], device=self.device))
         elif self.signature == "mostly_plus":
             # (+,-,-,-) signature: g_μν = diag(1, -1, -1, -1)
-            return torch.diag(torch.tensor([1., -1., -1., -1.], device=self.device))
+            return torch.diag(torch.tensor([1.0, -1.0, -1.0, -1.0], device=self.device))
         else:
             raise ValueError(f"Unknown signature: {self.signature}")
 
     def interval(self, x: Tensor, y: Tensor) -> Tensor:
         """
         Calculate the spacetime interval between two events.
-        
+
         The spacetime interval is invariant under Lorentz transformations.
-        
+
         Args:
             x (Tensor): First spacetime point [batch, 4]
             y (Tensor): Second spacetime point [batch, 4]
-            
+
         Returns:
             Tensor: Spacetime interval ds² = gμν(xμ-yμ)(xν-yν)
         """
@@ -631,32 +722,32 @@ class MinkowskiMetric:
 
         # Apply metric to calculate interval
         # ds² = gμν dx^μ dx^ν
-        result = torch.einsum('bi,ij,bj->b', delta, self._metric, delta)
+        result = torch.einsum("bi,ij,bj->b", delta, self._metric, delta)
 
         return result
 
     def raise_index(self, vector: Tensor) -> Tensor:
         """
         Raise the index of a 4-vector (convert from covariant to contravariant).
-        
+
         Args:
             vector (Tensor): Covariant 4-vector [batch, 4]
-            
+
         Returns:
             Tensor: Contravariant 4-vector [batch, 4]
         """
-        return torch.einsum('bi,ij->bj', vector, self._metric)
+        return torch.einsum("bi,ij->bj", vector, self._metric)
 
     def lower_index(self, vector: Tensor) -> Tensor:
         """
         Lower the index of a 4-vector (convert from contravariant to covariant).
-        
+
         Args:
             vector (Tensor): Contravariant 4-vector [batch, 4]
-            
+
         Returns:
             Tensor: Covariant 4-vector [batch, 4]
         """
         # For Minkowski metric, raising and lowering are similar
         # with sign changes based on metric signature
-        return torch.einsum('bi,ij->bj', vector, self._metric)
+        return torch.einsum("bi,ij->bj", vector, self._metric)

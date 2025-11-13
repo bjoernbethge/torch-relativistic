@@ -14,28 +14,35 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 
+from .utils import calculate_gamma, clamp_velocity
+
 
 class TerrellPenroseTransform(nn.Module):
     """
     Applies a transformation inspired by the Terrell-Penrose effect to feature vectors.
-    
+
     The Terrell-Penrose effect describes how fast-moving objects appear rotated rather
     than contracted. This module applies a similar principle to feature vectors,
     where different feature dimensions are transformed based on their "observational distance"
     and a velocity parameter that controls the strength of the effect.
-    
+
     Args:
         feature_dim (int): Dimension of input features
         max_velocity (float, optional): Maximum relativistic velocity (0-1). Defaults to 0.9.
         learnable (bool, optional): Whether velocity parameter is learnable. Defaults to True.
         mode (str, optional): Transformation mode ('rotation' or 'full'). Defaults to "rotation".
-        
+
     Attributes:
         velocity (Parameter): Relativistic velocity parameter (fraction of c)
     """
 
-    def __init__(self, feature_dim: int, max_velocity: float = 0.9,
-                 learnable: bool = True, mode: str = "rotation"):
+    def __init__(
+        self,
+        feature_dim: int,
+        max_velocity: float = 0.9,
+        learnable: bool = True,
+        mode: str = "rotation",
+    ):
         super().__init__()
         self.feature_dim = feature_dim
         self.max_velocity = max_velocity
@@ -43,16 +50,14 @@ class TerrellPenroseTransform(nn.Module):
 
         # Relativistic velocity parameter (learnable or fixed)
         self.velocity = nn.Parameter(
-            torch.Tensor([0.5 * max_velocity]),
-            requires_grad=learnable
+            torch.Tensor([0.5 * max_velocity]), requires_grad=learnable
         )
 
         # Feature distances - determine how each dimension is transformed
         # In the Terrell-Penrose effect, the "distance" affects how objects appear
         # Here each feature dimension has a distance that affects its transformation
         self.distances = nn.Parameter(
-            torch.linspace(0, 1, feature_dim).unsqueeze(0),
-            requires_grad=learnable
+            torch.linspace(0, 1, feature_dim).unsqueeze(0), requires_grad=learnable
         )
 
         # For rotation mode, we need rotation matrix parameters
@@ -64,10 +69,10 @@ class TerrellPenroseTransform(nn.Module):
     def forward(self, x: Tensor) -> Tensor:
         """
         Apply relativistic transformation to input features.
-        
+
         Args:
             x (Tensor): Input tensor [batch_size, ..., feature_dim]
-            
+
         Returns:
             Tensor: Transformed tensor [batch_size, ..., feature_dim]
         """
@@ -78,8 +83,8 @@ class TerrellPenroseTransform(nn.Module):
         reshaped_x = x.reshape(-1, self.feature_dim)
 
         # Calculate relativistic factor
-        v = torch.clamp(self.velocity, -self.max_velocity, self.max_velocity)
-        gamma = 1.0 / torch.sqrt(1.0 - v ** 2)
+        v = clamp_velocity(self.velocity, self.max_velocity, -self.max_velocity)
+        gamma = calculate_gamma(v)
 
         if self.mode == "rotation":
             # Apply Terrell-Penrose-inspired rotation
@@ -94,11 +99,11 @@ class TerrellPenroseTransform(nn.Module):
     def _apply_rotation(self, x: Tensor, gamma: Tensor) -> Tensor:
         """
         Apply rotation transformation inspired by Terrell-Penrose effect.
-        
+
         Args:
             x (Tensor): Flattened input tensor [batch*..., feature_dim]
             gamma (Tensor): Relativistic gamma factor
-            
+
         Returns:
             Tensor: Rotated tensor [batch*..., feature_dim]
         """
@@ -134,18 +139,18 @@ class TerrellPenroseTransform(nn.Module):
 
         # Remove padding if added
         if x.size(-1) != self.feature_dim:
-            rotated = rotated[..., :self.feature_dim]
+            rotated = rotated[..., : self.feature_dim]
 
         return rotated
 
     def _apply_full_transform(self, x: Tensor, gamma: Tensor) -> Tensor:
         """
         Apply full relativistic transformation with distance-dependent effects.
-        
+
         Args:
             x (Tensor): Flattened input tensor [batch*..., feature_dim]
             gamma (Tensor): Relativistic gamma factor
-            
+
         Returns:
             Tensor: Transformed tensor [batch*..., feature_dim]
         """
@@ -175,45 +180,51 @@ class TerrellPenroseTransform(nn.Module):
 class LorentzBoost(nn.Module):
     """
     Applies a Lorentz boost transformation to feature vectors.
-    
+
     In special relativity, a Lorentz boost describes the transformation between
     two reference frames in relative motion. This module applies an analogous
     transformation to feature vectors, allowing neural networks to process
     information as if from different "reference frames".
-    
+
     Args:
         feature_dim (int): Dimension of feature vectors
         time_dim (int, optional): Dimension to use as time component. Defaults to 0.
         max_velocity (float, optional): Maximum velocity parameter (0-1). Defaults to 0.9.
         learnable (bool, optional): Whether velocity parameters are learnable. Defaults to True.
-        
+
     Attributes:
         velocity (Parameter): 3D velocity vector (fractions of c)
     """
 
-    def __init__(self, feature_dim: int, time_dim: int = 0, max_velocity: float = 0.9,
-                 learnable: bool = True):
+    def __init__(
+        self,
+        feature_dim: int,
+        time_dim: int = 0,
+        max_velocity: float = 0.9,
+        learnable: bool = True,
+    ):
         super().__init__()
         self.feature_dim = feature_dim
         self.time_dim = time_dim
         self.max_velocity = max_velocity
 
         # At minimum, we need 4D features (time + 3D space)
-        assert feature_dim >= 4, "Feature dimension must be at least 4 for spacetime representation"
+        assert (
+            feature_dim >= 4
+        ), "Feature dimension must be at least 4 for spacetime representation"
 
         # Velocity vector (3D)
         self.velocity = nn.Parameter(
-            torch.zeros(3) + 0.1,  # Small initial values
-            requires_grad=learnable
+            torch.zeros(3) + 0.1, requires_grad=learnable  # Small initial values
         )
 
     def forward(self, x: Tensor) -> Tensor:
         """
         Apply Lorentz boost to features.
-        
+
         Args:
             x (Tensor): Input tensor [batch_size, ..., feature_dim]
-            
+
         Returns:
             Tensor: Boosted tensor [batch_size, ..., feature_dim]
         """
@@ -234,11 +245,11 @@ class LorentzBoost(nn.Module):
         r = spacetime[:, space_indices]  # [batch, 3]
 
         # Get velocity vector and calculate relativistic gamma
-        v = torch.clamp(self.velocity, -self.max_velocity, self.max_velocity)
+        v = clamp_velocity(self.velocity, self.max_velocity, -self.max_velocity)
         v_magnitude = torch.norm(v, dim=0)
         v_normalized = v / (v_magnitude + 1e-8)
 
-        gamma = 1.0 / torch.sqrt(1.0 - v_magnitude ** 2)
+        gamma = calculate_gamma(v_magnitude)
 
         # Apply Lorentz boost transformation
         # t' = γ(t - v·r/c²)
@@ -250,8 +261,9 @@ class LorentzBoost(nn.Module):
 
         # Transform space components
         space_transform = r + torch.outer(
-            gamma * (gamma - 1) * v_dot_r.squeeze() / (v_magnitude ** 2 + 1e-8) - gamma * t.squeeze(),
-            v
+            gamma * (gamma - 1) * v_dot_r.squeeze() / (v_magnitude**2 + 1e-8)
+            - gamma * t.squeeze(),
+            v,
         )
 
         # Combine transformed components back into spacetime
@@ -276,11 +288,11 @@ class LorentzBoost(nn.Module):
 class RelativisticPooling(nn.Module):
     """
     Pooling operation with relativistic weighting of spatial regions.
-    
+
     Inspired by how the Terrell-Penrose effect causes different spatial regions
     to contribute differently to the observed image, this pooling layer applies
     a similar principle where pooling weights are modulated by relativistic effects.
-    
+
     Args:
         kernel_size (Union[int, Tuple[int, ...]]): Size of the pooling kernel
         stride (Optional[Union[int, Tuple[int, ...]]]): Stride of the pooling operation.
@@ -288,21 +300,32 @@ class RelativisticPooling(nn.Module):
         padding (Union[int, Tuple[int, ...]]): Padding to be added to input. Defaults to 0.
         max_velocity (float): Maximum velocity parameter (0-1). Defaults to 0.9.
         mode (str): Pooling mode ('max', 'avg', 'relativistic'). Defaults to "relativistic".
-        
+
     Note:
         When mode='relativistic', pooling weights are non-uniform and depend on
         a learned "velocity" parameter and the position in the kernel.
     """
 
-    def __init__(self, kernel_size: Union[int, Tuple[int, ...]],
-                 stride: Optional[Union[int, Tuple[int, ...]]] = None,
-                 padding: Union[int, Tuple[int, ...]] = 0,
-                 max_velocity: float = 0.9,
-                 mode: str = "relativistic"):
+    def __init__(
+        self,
+        kernel_size: Union[int, Tuple[int, ...]],
+        stride: Optional[Union[int, Tuple[int, ...]]] = None,
+        padding: Union[int, Tuple[int, ...]] = 0,
+        max_velocity: float = 0.9,
+        mode: str = "relativistic",
+    ):
         super().__init__()
-        self.kernel_size = kernel_size if isinstance(kernel_size, tuple) else (kernel_size, kernel_size)
+        self.kernel_size = (
+            kernel_size
+            if isinstance(kernel_size, tuple)
+            else (kernel_size, kernel_size)
+        )
         self.stride = stride if stride is not None else self.kernel_size
-        self.stride = self.stride if isinstance(self.stride, tuple) else (self.stride, self.stride)
+        self.stride = (
+            self.stride
+            if isinstance(self.stride, tuple)
+            else (self.stride, self.stride)
+        )
         self.padding = padding if isinstance(padding, tuple) else (padding, padding)
         self.max_velocity = max_velocity
         self.mode = mode
@@ -331,10 +354,10 @@ class RelativisticPooling(nn.Module):
     def forward(self, x: Tensor) -> Tensor:
         """
         Apply relativistic pooling to input tensor.
-        
+
         Args:
             x (Tensor): Input tensor [batch_size, channels, height, width]
-            
+
         Returns:
             Tensor: Pooled tensor
         """
@@ -350,19 +373,31 @@ class RelativisticPooling(nn.Module):
     def _relativistic_pool(self, x: Tensor) -> Tensor:
         """
         Apply pooling with relativistic weighting.
-        
+
         Args:
             x (Tensor): Input tensor [batch_size, channels, height, width]
-            
+
         Returns:
             Tensor: Pooled tensor
         """
         batch_size, channels, height, width = x.shape
 
         # Prepare output dimensions
-        kernel_size = self.kernel_size if isinstance(self.kernel_size, tuple) else (self.kernel_size, self.kernel_size)
-        stride = self.stride if isinstance(self.stride, tuple) else (self.stride, self.stride)
-        padding = self.padding if isinstance(self.padding, tuple) else (self.padding, self.padding)
+        kernel_size = (
+            self.kernel_size
+            if isinstance(self.kernel_size, tuple)
+            else (self.kernel_size, self.kernel_size)
+        )
+        stride = (
+            self.stride
+            if isinstance(self.stride, tuple)
+            else (self.stride, self.stride)
+        )
+        padding = (
+            self.padding
+            if isinstance(self.padding, tuple)
+            else (self.padding, self.padding)
+        )
         out_height = (height + 2 * padding[0] - kernel_size[0]) // stride[0] + 1
         out_width = (width + 2 * padding[1] - kernel_size[1]) // stride[1] + 1
 
@@ -374,17 +409,17 @@ class RelativisticPooling(nn.Module):
         weights = self._calculate_relativistic_weights()
 
         # Create output tensor
-        output = torch.zeros((batch_size, channels, out_height, out_width), device=x.device)
-
-        # Unfold input tensor to extract patches
-        patches = F.unfold(
-            x,
-            kernel_size=kernel_size,
-            stride=stride
+        output = torch.zeros(
+            (batch_size, channels, out_height, out_width), device=x.device
         )
 
+        # Unfold input tensor to extract patches
+        patches = F.unfold(x, kernel_size=kernel_size, stride=stride)
+
         # Reshape patches for weighted combination
-        patches = patches.view(batch_size, channels, kernel_size[0] * kernel_size[1], -1)
+        patches = patches.view(
+            batch_size, channels, kernel_size[0] * kernel_size[1], -1
+        )
 
         # Apply relativistic weighting to each patch
         weights = weights.view(1, 1, -1, 1)  # [1, 1, kernel_size*kernel_size, 1]
@@ -401,22 +436,28 @@ class RelativisticPooling(nn.Module):
     def _calculate_relativistic_weights(self) -> Tensor:
         """
         Calculate weights based on relativistic effects.
-        
+
         Returns:
             Tensor: Relativistic weights for each position in kernel
         """
         # Create position grid for kernel
-        y_indices = torch.arange(self.kernel_size[0], device=self.velocity_vector.device)
-        x_indices = torch.arange(self.kernel_size[1], device=self.velocity_vector.device)
+        y_indices = torch.arange(
+            self.kernel_size[0], device=self.velocity_vector.device
+        )
+        x_indices = torch.arange(
+            self.kernel_size[1], device=self.velocity_vector.device
+        )
 
-        grid_y, grid_x = torch.meshgrid(y_indices, x_indices, indexing='ij')
+        grid_y, grid_x = torch.meshgrid(y_indices, x_indices, indexing="ij")
 
         # Normalize positions to [0, 1] range
         pos_y = grid_y.float() / (self.kernel_size[0] - 1)
         pos_x = grid_x.float() / (self.kernel_size[1] - 1)
 
         # Stack positions
-        positions = torch.stack([pos_y.flatten(), pos_x.flatten()], dim=1)  # [kernel_size*kernel_size, 2]
+        positions = torch.stack(
+            [pos_y.flatten(), pos_x.flatten()], dim=1
+        )  # [kernel_size*kernel_size, 2]
 
         # Calculate vector from reference point to each position
         rel_positions = positions - self.reference_point
@@ -425,8 +466,8 @@ class RelativisticPooling(nn.Module):
         v_norm = self.velocity_vector / (torch.norm(self.velocity_vector) + 1e-8)
 
         # Calculate relativistic parameters
-        v_magnitude = torch.clamp(self.velocity_magnitude, 0.0, self.max_velocity)
-        gamma = 1.0 / torch.sqrt(1.0 - v_magnitude ** 2)
+        v_magnitude = clamp_velocity(self.velocity_magnitude, self.max_velocity)
+        gamma = calculate_gamma(v_magnitude)
 
         # Project positions onto velocity direction
         proj = torch.sum(rel_positions * v_norm, dim=1)
@@ -445,12 +486,12 @@ class RelativisticPooling(nn.Module):
 class SpacetimeConvolution(nn.Module):
     """
     Convolution with relativistic spacetime geometry considerations.
-    
+
     This module extends standard convolution to incorporate relativistic effects
     inspired by the Terrell-Penrose effect. The key insight is that information
     from different spatial locations and temporal offsets is processed as if
     affected by relativistic distortions due to relative motion.
-    
+
     Args:
         in_channels (int): Number of input channels
         out_channels (int): Number of output channels
@@ -461,20 +502,24 @@ class SpacetimeConvolution(nn.Module):
         groups (int, optional): Number of blocked connections. Defaults to 1.
         bias (bool, optional): If True, adds a learnable bias. Defaults to True.
         max_velocity (float, optional): Maximum velocity parameter. Defaults to 0.9.
-        
+
     Note:
         For temporal sequences, the first input dimension is treated as time.
         For spatial inputs, relativistic effects are applied to the spatial dimensions.
     """
 
-    def __init__(self, in_channels: int, out_channels: int,
-                 kernel_size: Union[int, Tuple[int, int, int]],
-                 stride: Union[int, Tuple[int, int, int]] = 1,
-                 padding: Union[str, int, Tuple[int, int, int]] = 0,
-                 dilation: Union[int, Tuple[int, int, int]] = 1,
-                 groups: int = 1,
-                 bias: bool = True,
-                 max_velocity: float = 0.9):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: Union[int, Tuple[int, int, int]],
+        stride: Union[int, Tuple[int, int, int]] = 1,
+        padding: Union[str, int, Tuple[int, int, int]] = 0,
+        dilation: Union[int, Tuple[int, int, int]] = 1,
+        groups: int = 1,
+        bias: bool = True,
+        max_velocity: float = 0.9,
+    ):
         super().__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
@@ -505,7 +550,7 @@ class SpacetimeConvolution(nn.Module):
             padding=self.padding,
             dilation=self.dilation,
             groups=groups,
-            bias=bias
+            bias=bias,
         )
 
         # Relativistic parameters
@@ -527,11 +572,11 @@ class SpacetimeConvolution(nn.Module):
     def forward(self, x: Tensor) -> Tensor:
         """
         Apply spacetime convolution with relativistic effects.
-        
+
         Args:
             x (Tensor): Input tensor [batch_size, channels, time, height, width]
                         or [batch_size, channels, height, width] (will be unsqueezed)
-            
+
         Returns:
             Tensor: Convolved tensor with relativistic effects
         """
@@ -550,31 +595,33 @@ class SpacetimeConvolution(nn.Module):
     def _apply_spacetime_transform(self, x: Tensor) -> Tensor:
         """
         Apply relativistic spacetime transformation to input.
-        
+
         Args:
             x (Tensor): Input tensor [batch_size, channels, time, height, width]
-            
+
         Returns:
             Tensor: Transformed tensor
         """
         batch_size, channels, time, height, width = x.shape
 
         # Normalize and clamp velocity for stability
-        v = torch.clamp(self.velocity, -self.max_velocity, self.max_velocity)
+        v = clamp_velocity(self.velocity, self.max_velocity, -self.max_velocity)
         v_magnitude = torch.norm(v)
 
         # If velocity is very small, skip transformation
         if v_magnitude < 1e-6:
             return x
 
-        gamma = 1.0 / torch.sqrt(1.0 - v_magnitude ** 2)
+        gamma = calculate_gamma(v_magnitude)
 
         # Create coordinate grids
         t_coords = torch.linspace(0, 1, time, device=x.device)
         y_coords = torch.linspace(0, 1, height, device=x.device)
         x_coords = torch.linspace(0, 1, width, device=x.device)
 
-        grid_t, grid_y, grid_x = torch.meshgrid(t_coords, y_coords, x_coords, indexing='ij')
+        grid_t, grid_y, grid_x = torch.meshgrid(
+            t_coords, y_coords, x_coords, indexing="ij"
+        )
 
         # Create sampling coordinates with relativistic transformation
         # These represent how coordinates are transformed due to relativistic effects
@@ -584,7 +631,9 @@ class SpacetimeConvolution(nn.Module):
         # x' = x + (γ-1)v(v·x)/v² - γvt
 
         # Stack spatial coordinates
-        coords = torch.stack([grid_t, grid_y, grid_x], dim=-1)  # [time, height, width, 3]
+        coords = torch.stack(
+            [grid_t, grid_y, grid_x], dim=-1
+        )  # [time, height, width, 3]
 
         # Calculate the dot product v·x
         v_dot_x = (coords * v).sum(dim=-1)  # [time, height, width]
@@ -593,8 +642,16 @@ class SpacetimeConvolution(nn.Module):
         t_prime = gamma * (grid_t - v[0] * v_dot_x)
 
         # Transform spatial coordinates
-        y_prime = grid_y + (gamma - 1) * v[1] * v_dot_x / (v_magnitude ** 2 + 1e-8) - gamma * v[1] * grid_t
-        x_prime = grid_x + (gamma - 1) * v[2] * v_dot_x / (v_magnitude ** 2 + 1e-8) - gamma * v[2] * grid_t
+        y_prime = (
+            grid_y
+            + (gamma - 1) * v[1] * v_dot_x / (v_magnitude**2 + 1e-8)
+            - gamma * v[1] * grid_t
+        )
+        x_prime = (
+            grid_x
+            + (gamma - 1) * v[2] * v_dot_x / (v_magnitude**2 + 1e-8)
+            - gamma * v[2] * grid_t
+        )
 
         # Normalize transformed coordinates to [-1, 1] range for grid_sample
         t_norm = 2.0 * t_prime - 1.0
@@ -611,11 +668,7 @@ class SpacetimeConvolution(nn.Module):
         # Use grid_sample for differentiable interpolation
         # This is a 3D analog of the 2D grid_sample
         x_transformed = F.grid_sample(
-            x,
-            grid,
-            mode='bilinear',
-            padding_mode='zeros',
-            align_corners=True
+            x, grid, mode="bilinear", padding_mode="zeros", align_corners=True
         )
 
         return x_transformed
