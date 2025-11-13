@@ -24,12 +24,12 @@ from torch_relativistic.attention import RelativisticSelfAttention
 from torch_relativistic.transforms import TerrellPenroseTransform
 
 __all__ = [
-    'RelativisticGraphConv',
-    'MultiObserverGNN',
-    'RelativisticLIFNeuron',
-    'TerrellPenroseSNN',
-    'RelativisticSelfAttention',
-    'TerrellPenroseTransform',
+    "RelativisticGraphConv",
+    "MultiObserverGNN",
+    "RelativisticLIFNeuron",
+    "TerrellPenroseSNN",
+    "RelativisticSelfAttention",
+    "TerrellPenroseTransform",
 ]
 
 # Typing support for mypy

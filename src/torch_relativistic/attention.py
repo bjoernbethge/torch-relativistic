@@ -2,7 +2,7 @@
 Relativistic attention mechanisms inspired by the Terrell-Penrose effect.
 
 This module provides attention mechanisms that incorporate concepts from
-special relativity, particularly the Terrell-Penrose effect, into neural 
+special relativity, particularly the Terrell-Penrose effect, into neural
 network attention. The key insight is modeling attention between tokens or
 nodes as if the information exchange is affected by relativistic effects.
 """
@@ -15,19 +15,21 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 
+from .utils import calculate_gamma, clamp_velocity
+
 
 class RelativisticSelfAttention(nn.Module):
     """
     Optimized self-attention mechanism incorporating relativistic time dilation and distortion.
-    
+
     This attention mechanism is inspired by the Terrell-Penrose effect, where
     rapidly moving objects appear rotated rather than contracted. This implementation
     uses parameter sharing, vectorized operations, and rotary position embeddings
     for better efficiency and performance.
-    
+
     Each attention head operates in a different "reference frame" with its own
     relativistic velocity parameter, but shares transformation parameters.
-    
+
     Args:
         hidden_dim (int): Dimension of input features
         num_heads (int, optional): Number of attention heads. Defaults to 8.
@@ -37,17 +39,26 @@ class RelativisticSelfAttention(nn.Module):
         pre_norm (bool, optional): Whether to use pre-normalization. Defaults to True.
     """
 
-    def __init__(self, hidden_dim: int, num_heads: int = 8, dropout: float = 0.1,
-                 max_velocity: float = 0.9, bias: bool = True, pre_norm: bool = True):
+    def __init__(
+        self,
+        hidden_dim: int,
+        num_heads: int = 8,
+        dropout: float = 0.1,
+        max_velocity: float = 0.9,
+        bias: bool = True,
+        pre_norm: bool = True,
+    ):
         super().__init__()
 
         self.hidden_dim = hidden_dim
         self.num_heads = num_heads
         self.head_dim = hidden_dim // num_heads
         self.pre_norm = pre_norm
-        self.scale = self.head_dim ** -0.5
+        self.scale = self.head_dim**-0.5
 
-        assert self.head_dim * num_heads == hidden_dim, "hidden_dim must be divisible by num_heads"
+        assert (
+            self.head_dim * num_heads == hidden_dim
+        ), "hidden_dim must be divisible by num_heads"
 
         # Shared projection layers (parameter sharing)
         self.qkv_proj = nn.Linear(hidden_dim, hidden_dim * 3, bias=bias)
@@ -68,7 +79,7 @@ class RelativisticSelfAttention(nn.Module):
         self.velocity_bias = nn.Parameter(velocity_base.unsqueeze(1))
 
         # Rotary Position Embedding parameters for relativistic position modeling
-        self.register_buffer('rope_freqs', self._get_rope_frequencies(self.head_dim))
+        self.register_buffer("rope_freqs", self._get_rope_frequencies(self.head_dim))
 
         # Initialize parameters
         self._reset_parameters()
@@ -78,11 +89,26 @@ class RelativisticSelfAttention(nn.Module):
         freqs = 1.0 / (base ** (torch.arange(0, dim, 2).float() / dim))
         return freqs
 
-    def _apply_rotary_pos_emb(self, q: torch.Tensor, k: torch.Tensor, positions: torch.Tensor) -> Tuple[
-        torch.Tensor, torch.Tensor]:
+    def _apply_rotary_pos_emb(
+        self, q: torch.Tensor, k: torch.Tensor, positions: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Apply rotary position embeddings to queries and keys."""
         device = q.device
-        t = positions.float().to(device)
+
+        # positions should be [batch, seq_len] or [batch, seq_len, dim], extract unique positions
+        # Since all batches have same positions (0, 1, 2, ..., seq_len-1)
+        # we can use just one sequence
+        if positions.dim() == 2:
+            t = positions[0].float().to(device)  # [seq_len]
+        elif positions.dim() == 3:
+            # If positions has extra dimension [batch, seq_len, 1], squeeze it
+            t = (
+                positions[0, :, 0].float().to(device)
+                if positions.shape[-1] == 1
+                else positions[0].float().to(device)
+            )
+        else:
+            t = positions.float().to(device)
 
         # Get frequencies for each position
         freqs = self.rope_freqs.to(device)
@@ -134,18 +160,22 @@ class RelativisticSelfAttention(nn.Module):
         if self.out_proj.bias is not None:
             nn.init.zeros_(self.out_proj.bias)
 
-    def forward(self, x: Tensor, attention_mask: Optional[Tensor] = None,
-                positions: Optional[Tensor] = None) -> Tensor:
+    def forward(
+        self,
+        x: Tensor,
+        attention_mask: Optional[Tensor] = None,
+        positions: Optional[Tensor] = None,
+    ) -> Tensor:
         """
         Forward pass of optimized relativistic self-attention.
-        
+
         Args:
             x (Tensor): Input tensor of shape [batch_size, seq_len, hidden_dim]
             attention_mask (Tensor, optional): Attention mask of shape [batch_size, seq_len].
                                               1 indicates value token, 0 indicates padding.
             positions (Tensor, optional): Position tensor for tokens [batch_size, seq_len, dim].
                                          Used to compute "spacetime" distances between tokens.
-            
+
         Returns:
             Tensor: Output tensor of shape [batch_size, seq_len, hidden_dim]
         """
@@ -157,7 +187,11 @@ class RelativisticSelfAttention(nn.Module):
 
         # Generate position indices if not provided
         if positions is None:
-            positions = torch.arange(seq_len, device=x.device).unsqueeze(0).expand(batch_size, -1)
+            positions = (
+                torch.arange(seq_len, device=x.device)
+                .unsqueeze(0)
+                .expand(batch_size, -1)
+            )
 
         # Project inputs to queries, keys, values in one go (efficient)
         qkv = self.qkv_proj(x)
@@ -167,16 +201,16 @@ class RelativisticSelfAttention(nn.Module):
 
         # Apply rotary position embeddings
         if positions is not None:
-            flat_positions = positions.reshape(batch_size * seq_len)
-            pos_indices = flat_positions.reshape(batch_size, seq_len)
-            q, k = self._apply_rotary_pos_emb(q, k, pos_indices)
+            q, k = self._apply_rotary_pos_emb(q, k, positions)
 
         # Calculate attention scores with optimized scaling
         attn_weights = torch.matmul(q, k.transpose(-1, -2)) * self.scale
 
         # Apply relativistic effects using vectorized operations
         if positions is not None:
-            attn_weights = self._apply_relativistic_effects_vectorized(attn_weights, positions)
+            attn_weights = self._apply_relativistic_effects_vectorized(
+                attn_weights, positions
+            )
 
         # Apply attention mask if provided
         if attention_mask is not None:
@@ -194,20 +228,24 @@ class RelativisticSelfAttention(nn.Module):
         attn_output = torch.matmul(attn_weights, v)  # [batch, heads, seq_len, head_dim]
 
         # Reshape and project to output dimension
-        attn_output = attn_output.transpose(1, 2).reshape(batch_size, seq_len, self.hidden_dim)
+        attn_output = attn_output.transpose(1, 2).reshape(
+            batch_size, seq_len, self.hidden_dim
+        )
         output = self.out_proj(attn_output)
         output = self.output_dropout(output)
 
         return output
 
-    def _apply_relativistic_effects_vectorized(self, attn_weights: Tensor, positions: Tensor) -> Tensor:
+    def _apply_relativistic_effects_vectorized(
+        self, attn_weights: Tensor, positions: Tensor
+    ) -> Tensor:
         """
         Apply relativistic effects to attention weights using vectorized operations.
-        
+
         Args:
             attn_weights (Tensor): Raw attention weights [batch, heads, seq_len, seq_len]
             positions (Tensor): Token positions [batch, seq_len, dim]
-            
+
         Returns:
             Tensor: Modified attention weights with relativistic effects
         """
@@ -219,11 +257,14 @@ class RelativisticSelfAttention(nn.Module):
             pos_extended = positions.unsqueeze(2)  # [batch, seq, 1, dim]
             distances = torch.norm(
                 pos_extended - positions.unsqueeze(1),  # [batch, 1, seq, dim]
-                dim=-1, p=2
+                dim=-1,
+                p=2,
             )  # [batch, seq, seq]
         else:
             # Use 1D positions
-            pos_diff = positions.unsqueeze(2) - positions.unsqueeze(1)  # [batch, seq, seq]
+            pos_diff = positions.unsqueeze(2) - positions.unsqueeze(
+                1
+            )  # [batch, seq, seq]
             distances = torch.abs(pos_diff)
 
         # Normalize distances for numerical stability
@@ -231,10 +272,12 @@ class RelativisticSelfAttention(nn.Module):
             distances = distances / (torch.max(distances) + 1e-8)
 
         # Calculate velocity for each head using the parametric form
-        velocity = torch.clamp(self.velocity_scale * self.velocity_bias, 0.0, 0.999)  # [heads, 1]
+        velocity = clamp_velocity(
+            self.velocity_scale * self.velocity_bias
+        )  # [heads, 1]
 
         # Calculate gamma (Lorentz factor) for each head
-        gamma = 1.0 / torch.sqrt(1.0 - velocity ** 2 + 1e-8)  # [heads, 1]
+        gamma = calculate_gamma(velocity)  # [heads, 1]
 
         # Prepare distances for broadcasting
         distances = distances.unsqueeze(1)  # [batch, 1, seq, seq]
@@ -242,7 +285,9 @@ class RelativisticSelfAttention(nn.Module):
         # Calculate relativistic modifiers for all heads simultaneously
         # This creates a tensor of shape [batch, heads, seq, seq]
         rel_modifiers = torch.exp(
-            -distances * gamma.view(1, num_heads, 1, 1) * velocity.view(1, num_heads, 1, 1)
+            -distances
+            * gamma.view(1, num_heads, 1, 1)
+            * velocity.view(1, num_heads, 1, 1)
         )
 
         # Apply modifiers to attention weights
@@ -258,13 +303,13 @@ class RelativisticSelfAttention(nn.Module):
 class RelativisticPositionalEncoding(nn.Module):
     """
     Positional encoding with relativistic considerations.
-    
+
     This module extends standard positional encodings by incorporating
     relativistic concepts, where the effective distance between positions
     is modulated by a learnable "velocity" parameter. This creates a
     non-uniform encoding of positions, with effective compression
     or dilation based on relativistic "proper distance" concepts.
-    
+
     Args:
         hidden_dim (int): Embedding dimension
         max_len (int, optional): Maximum sequence length to pre-compute. Defaults to 5000.
@@ -282,33 +327,37 @@ class RelativisticPositionalEncoding(nn.Module):
 
         # Create standard positional encoding buffer
         position = torch.arange(0, max_len).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, hidden_dim, 2) * -(math.log(10000.0) / hidden_dim))
+        div_term = torch.exp(
+            torch.arange(0, hidden_dim, 2) * -(math.log(10000.0) / hidden_dim)
+        )
 
         # Initialize buffer for positional encodings
         # We'll transform these with relativistic effects during forward pass
         pe = torch.zeros(1, max_len, hidden_dim)
         pe[0, :, 0::2] = torch.sin(position * div_term)
         pe[0, :, 1::2] = torch.cos(position * div_term)
-        self.register_buffer('pe_base', pe)
+        self.register_buffer("pe_base", pe)
 
     def forward(self, x: Tensor) -> Tensor:
         """
         Add relativistic positional encodings to the input.
-        
+
         Args:
             x (Tensor): Input tensor [batch_size, seq_len, hidden_dim]
-            
+
         Returns:
             Tensor: Input with added positional encodings
         """
         seq_len = x.size(1)
 
         if seq_len > self.max_len:
-            raise ValueError(f"Input sequence length {seq_len} exceeds maximum length {self.max_len}")
+            raise ValueError(
+                f"Input sequence length {seq_len} exceeds maximum length {self.max_len}"
+            )
 
         # Compute relativistic position encodings
-        v = torch.clamp(self.velocity, 0.0, 0.999)
-        gamma = 1.0 / torch.sqrt(1.0 - v ** 2)
+        v = clamp_velocity(self.velocity)
+        gamma = calculate_gamma(v)
 
         # Create position indices
         positions = torch.arange(seq_len, device=x.device).float()
@@ -325,8 +374,9 @@ class RelativisticPositionalEncoding(nn.Module):
         rel_weight_low = 1.0 - rel_weight_high
 
         # Interpolate positional encodings
-        pe = self.pe_base[0, rel_idx_low] * rel_weight_low.unsqueeze(-1) + \
-             self.pe_base[0, rel_idx_high] * rel_weight_high.unsqueeze(-1)
+        pe = self.pe_base[0, rel_idx_low] * rel_weight_low.unsqueeze(-1) + self.pe_base[
+            0, rel_idx_high
+        ] * rel_weight_high.unsqueeze(-1)
 
         # Add to input and apply dropout
         return self.dropout(x + pe.unsqueeze(0))
@@ -335,12 +385,12 @@ class RelativisticPositionalEncoding(nn.Module):
 class RelativisticTemporalAttention(nn.Module):
     """
     Attention mechanism for sequences with relativistic time dilation effects.
-    
+
     This module is designed for temporal sequences where the Terrell-Penrose effect
     inspires a non-uniform processing of time. Different parts of a sequence are
     processed with different "time dilation" factors, allowing the network to
     automatically focus on relevant temporal scales.
-    
+
     Args:
         hidden_dim (int): Feature dimension
         num_heads (int, optional): Number of attention heads. Defaults to 8.
@@ -348,8 +398,13 @@ class RelativisticTemporalAttention(nn.Module):
         max_velocity (float, optional): Maximum "velocity" parameter. Defaults to 0.9.
     """
 
-    def __init__(self, hidden_dim: int, num_heads: int = 8, dropout: float = 0.1,
-                 max_velocity: float = 0.9):
+    def __init__(
+        self,
+        hidden_dim: int,
+        num_heads: int = 8,
+        dropout: float = 0.1,
+        max_velocity: float = 0.9,
+    ):
         super().__init__()
         self.hidden_dim = hidden_dim
         self.num_heads = num_heads
@@ -360,7 +415,7 @@ class RelativisticTemporalAttention(nn.Module):
             hidden_dim=hidden_dim,
             num_heads=num_heads,
             dropout=dropout,
-            max_velocity=max_velocity
+            max_velocity=max_velocity,
         )
 
         # Temporal processing components
@@ -374,24 +429,28 @@ class RelativisticTemporalAttention(nn.Module):
             nn.GELU(),
             nn.Dropout(dropout),
             nn.Linear(hidden_dim * 4, hidden_dim),
-            nn.Dropout(dropout)
+            nn.Dropout(dropout),
         )
 
         # Time dilation parameters
         self.time_dilation = nn.Parameter(torch.zeros(1))
 
-    def forward(self, x: Tensor, timestamps: Optional[Tensor] = None,
-                mask: Optional[Tensor] = None) -> Tensor:
+    def forward(
+        self,
+        x: Tensor,
+        timestamps: Optional[Tensor] = None,
+        mask: Optional[Tensor] = None,
+    ) -> Tensor:
         """
         Forward pass with relativistic temporal attention.
-        
+
         Args:
             x (Tensor): Input features [batch_size, seq_len, hidden_dim]
             timestamps (Tensor, optional): Timestamps for each element [batch_size, seq_len].
                                           Defaults to None (uses position indices).
-            mask (Tensor, optional): Attention mask [batch_size, seq_len]. 
+            mask (Tensor, optional): Attention mask [batch_size, seq_len].
                                     Defaults to None.
-            
+
         Returns:
             Tensor: Processed features [batch_size, seq_len, hidden_dim]
         """
@@ -404,8 +463,8 @@ class RelativisticTemporalAttention(nn.Module):
 
         # Apply relativistic time dilation to timestamps
         # v represents "velocity through time" affecting how time intervals are perceived
-        v = torch.tanh(self.time_dilation) * 0.99  # Constrain < 1
-        gamma = 1.0 / torch.sqrt(1.0 - v ** 2 + 1e-8)
+        v = clamp_velocity(torch.tanh(self.time_dilation) * 0.99)
+        gamma = calculate_gamma(v)
 
         # Transform timestamps to account for relativistic effects
         rel_timestamps = timestamps / gamma
