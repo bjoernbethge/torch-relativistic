@@ -375,9 +375,9 @@ class RelativisticPositionalEncoding(nn.Module):
 
         # Interpolate positional encodings
         pe_base_tensor = cast(Tensor, self.pe_base)
-        pe = pe_base_tensor[0, rel_idx_low] * rel_weight_low.unsqueeze(-1) + pe_base_tensor[
-            0, rel_idx_high
-        ] * rel_weight_high.unsqueeze(-1)
+        pe = pe_base_tensor[0, rel_idx_low] * rel_weight_low.unsqueeze(
+            -1
+        ) + pe_base_tensor[0, rel_idx_high] * rel_weight_high.unsqueeze(-1)
 
         # Add to input and apply dropout
         return self.dropout(x + pe.unsqueeze(0))

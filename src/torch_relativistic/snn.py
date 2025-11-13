@@ -6,7 +6,7 @@ spiking neural networks. The key insight is that light travel time effects in th
 Terrell-Penrose effect have analogies to signal propagation delays in SNNs.
 """
 
-from typing import Optional, Tuple, Dict, List, Union, Any, cast
+from typing import Optional, Tuple, Dict, List, Union, cast
 
 import torch
 import torch.nn as nn
