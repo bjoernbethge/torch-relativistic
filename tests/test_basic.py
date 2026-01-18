@@ -60,4 +60,17 @@ class TestImports:
 
         if class_name == "RelativisticGraphConv":
             instance = cls(4, 8)
-        elif class_name == "MultiObserver
+        elif class_name == "MultiObserverGNN":
+            instance = cls(4, 8, 16)
+        elif class_name == "RelativisticLIFNeuron":
+            instance = cls(4)
+        elif class_name == "TerrellPenroseSNN":
+            instance = cls(4, 8, 16)
+        elif class_name == "RelativisticSelfAttention":
+            instance = cls(64)
+        elif class_name == "TerrellPenroseTransform":
+            instance = cls(64)
+        elif class_name == "LorentzBoost":
+            instance = cls(4)
+
+        assert instance is not None, f"Klasse {class_name} konnte nicht instanziiert werden"
