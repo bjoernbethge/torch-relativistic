@@ -6,7 +6,7 @@ spiking neural networks. The key insight is that light travel time effects in th
 Terrell-Penrose effect have analogies to signal propagation delays in SNNs.
 """
 
-from typing import Optional, Tuple, Dict, List
+from typing import Optional, Tuple, Dict, List, Union, cast
 
 import torch
 import torch.nn as nn
@@ -284,8 +284,8 @@ class TerrellPenroseSNN(nn.Module):
             )
 
         # output storage for all time steps
-        all_outputs = []
-        all_hidden_spikes = []
+        all_outputs: List[Tensor] = []
+        all_hidden_spikes: List[Tensor] = []
 
         # calculate relativistic Lorentz factor
         v = clamp_velocity(self.lorentz_factor)
@@ -344,7 +344,7 @@ class TerrellPenroseSNN(nn.Module):
             all_outputs.append(output)
 
         # stack output over time dimension
-        all_outputs = torch.stack(
+        stacked_outputs = torch.stack(
             all_outputs, dim=1
         )  # [batch_size, time_steps, output_size]
 
@@ -361,12 +361,12 @@ class TerrellPenroseSNN(nn.Module):
 
         # apply weighted summation over time
         weighted_output = torch.sum(
-            all_outputs * combined_weights.view(1, -1, 1), dim=1
+            stacked_outputs * combined_weights.view(1, -1, 1), dim=1
         )
 
         return weighted_output
 
-    def get_spike_history(self, x: Tensor) -> Dict[str, torch.Tensor]:
+    def get_spike_history(self, x: Tensor) -> Dict[str, Union[torch.Tensor, float]]:
         """
         Get spike history for visualization and analysis.
 
@@ -535,8 +535,8 @@ class RelativeSynapticPlasticity(nn.Module):
         """
         with torch.no_grad():
             # Update presynaptic trace
-            pre_trace: Tensor = self.pre_trace
-            post_trace: Tensor = self.post_trace
+            pre_trace: Tensor = cast(Tensor, self.pre_trace)
+            post_trace: Tensor = cast(Tensor, self.post_trace)
 
             pre_trace.data = pre_trace.data * self.pre_decay + pre_spikes.mean(0)
             post_trace.data = post_trace.data * self.post_decay + post_spikes.mean(0)
@@ -561,8 +561,8 @@ class RelativeSynapticPlasticity(nn.Module):
         # representing how time dilates in different activity regimes
         with torch.no_grad():
             # Get traces as Tensors
-            pre_trace: Tensor = self.pre_trace
-            post_trace: Tensor = self.post_trace
+            pre_trace: Tensor = cast(Tensor, self.pre_trace)
+            post_trace: Tensor = cast(Tensor, self.post_trace)
 
             # Pre-post correlation
             dw = (

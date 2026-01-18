@@ -8,7 +8,7 @@ nodes as if the information exchange is affected by relativistic effects.
 """
 
 import math
-from typing import Optional, Tuple
+from typing import Optional, Tuple, cast
 
 import torch
 import torch.nn as nn
@@ -111,7 +111,7 @@ class RelativisticSelfAttention(nn.Module):
             t = positions.float().to(device)
 
         # Get frequencies for each position
-        freqs = self.rope_freqs.to(device)
+        freqs = cast(Tensor, self.rope_freqs).to(device)
         freqs = freqs.view(1, 1, -1)  # [1, 1, dim/2]
 
         # Create sinusoidal pattern
@@ -374,9 +374,10 @@ class RelativisticPositionalEncoding(nn.Module):
         rel_weight_low = 1.0 - rel_weight_high
 
         # Interpolate positional encodings
-        pe = self.pe_base[0, rel_idx_low] * rel_weight_low.unsqueeze(-1) + self.pe_base[
-            0, rel_idx_high
-        ] * rel_weight_high.unsqueeze(-1)
+        pe_base_tensor = cast(Tensor, self.pe_base)
+        pe = pe_base_tensor[0, rel_idx_low] * rel_weight_low.unsqueeze(
+            -1
+        ) + pe_base_tensor[0, rel_idx_high] * rel_weight_high.unsqueeze(-1)
 
         # Add to input and apply dropout
         return self.dropout(x + pe.unsqueeze(0))

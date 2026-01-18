@@ -300,7 +300,7 @@ class SpaceDataVisualizer:
             df_pandas['altitude_km'] = (semi_major_axis_m / 1000) - earth_radius_km
         
         # Create subplots for different orbital elements
-        subplot_titles = []
+        subplot_titles: list[str] = []
         has_inclination = 'inclination_deg' in df_pandas.columns
         has_eccentricity = 'eccentricity' in df_pandas.columns  
         has_altitude = 'altitude_km' in df_pandas.columns
